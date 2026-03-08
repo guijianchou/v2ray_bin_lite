@@ -63,7 +63,6 @@ SOCKS_FLAG=0
 # ssconf_basic_v2ray_network_flow_
 # ssconf_basic_type_
 # ssconf_basic_v2ray_protocol_
-# ssconf_basic_v2ray_xray_
 # ssconf_basic_trojan_binary_
 # ssconf_basic_trojan_network_
 # ssconf_basic_trojan_sni_
@@ -174,7 +173,6 @@ prepare(){
 		[ -n "$(dbus get ssconf_basic_trojan_sni_$nu)" ] && echo dbus set ssconf_basic_trojan_sni_$q=$(dbus get ssconf_basic_trojan_sni_$nu)  >> /tmp/ss_conf.sh	
 		[ -n "$(dbus get ssconf_basic_type_$nu)" ] && echo dbus set ssconf_basic_type_$q=$(dbus get ssconf_basic_type_$nu) >> /tmp/ss_conf.sh
 		[ -n "$(dbus get ssconf_basic_v2ray_protocol_$nu)" ] && echo dbus set ssconf_basic_v2ray_protocol_$q=$(dbus get ssconf_basic_v2ray_protocol_$nu) >> /tmp/ss_conf.sh
-		[ -n "$(dbus get ssconf_basic_v2ray_xray_$nu)" ] && echo dbus set ssconf_basic_v2ray_xray_$q=$(dbus get ssconf_basic_v2ray_xray_$nu) >> /tmp/ss_conf.sh
 		[ -n "$(dbus get ssconf_basic_v2ray_network_tlshost_$nu)" ] && echo dbus set ssconf_basic_v2ray_network_tlshost_$q=$(dbus get ssconf_basic_v2ray_network_tlshost_$nu)  >> /tmp/ss_conf.sh	
 		[ -n "$(dbus get ssconf_basic_v2ray_network_flow_$nu)" ] && echo dbus set ssconf_basic_v2ray_network_flow_$q=$(dbus get ssconf_basic_v2ray_network_flow_$nu)  >> /tmp/ss_conf.sh	
 		[ -n "$(dbus get ssconf_basic_fingerprint_$nu)" ] && echo dbus set ssconf_basic_fingerprint_$q=$(dbus get ssconf_basic_fingerprint_$nu)  >> /tmp/ss_conf.sh			
@@ -643,7 +641,6 @@ add_vmess_servers(){
 	[[ $1 -ge 1000 ]] && dbus set ssconf_basic_group_$v2rayindex=$v2ray_group
 	dbus set ssconf_basic_type_$v2rayindex=3
 	dbus set ssconf_basic_v2ray_protocol_$v2rayindex="vmess"
-	dbus set ssconf_basic_v2ray_xray_$v2rayindex="xray"
 	if [ -n "$v2ray_group" ]; then
 		dbus set ssconf_basic_allowinsecure_$v2rayindex=1
 	else
@@ -1031,7 +1028,6 @@ add_vless_servers(){
 	[[ $1 -ge 1000 ]] && dbus set ssconf_basic_group_$v2rayindex=$vless_group
 	dbus set ssconf_basic_type_$v2rayindex=3
 	dbus set ssconf_basic_v2ray_protocol_$v2rayindex="vless"
-	dbus set ssconf_basic_v2ray_xray_$v2rayindex="xray"
 	if [ -n "$vless_group" ]; then
 		dbus set ssconf_basic_allowinsecure_$v2rayindex=1
 	else
@@ -1337,7 +1333,6 @@ del_none_exist(){
 					dbus remove ssconf_basic_v2ray_security_$localindex
 					dbus remove ssconf_basic_v2ray_use_json_$localindex
 					dbus remove ssconf_basic_v2ray_uuid_$localindex
-					dbus remove ssconf_basic_v2ray_xray_$localindex
 					dbus remove ssconf_basic_weight_$localindex
 					dbus remove ssconf_basic_naive_protocol_$localindex
 					dbus remove ssconf_basic_naive_user_$localindex
@@ -1431,7 +1426,6 @@ remove_node_gap(){
 				[ -n "$(dbus get ssconf_basic_fingerprint_$nu)" ] && dbus set ssconf_basic_fingerprint_"$y"="$(dbus get ssconf_basic_fingerprint_$nu)" && dbus remove ssconf_basic_fingerprint_$nu
 				[ -n "$(dbus get ssconf_basic_type_$nu)" ] && dbus set ssconf_basic_type_"$y"="$(dbus get ssconf_basic_type_$nu)" && dbus remove ssconf_basic_type_$nu
 				[ -n "$(dbus get ssconf_basic_v2ray_protocol_$nu)" ] && dbus set ssconf_basic_v2ray_protocol_"$y"="$(dbus get ssconf_basic_v2ray_protocol_$nu)" && dbus remove ssconf_basic_v2ray_protocol_$nu
-				[ -n "$(dbus get ssconf_basic_v2ray_xray_$nu)" ] && dbus set ssconf_basic_v2ray_xray_"$y"="$(dbus get ssconf_basic_v2ray_xray_$nu)" && dbus remove ssconf_basic_v2ray_xray_$nu
 				[ -n "$(dbus get ssconf_basic_v2ray_network_tlshost_$nu)" ] && dbus set ssconf_basic_v2ray_network_tlshost_"$y"="$(dbus get ssconf_basic_v2ray_network_tlshost_$nu)"  && dbus remove ssconf_basic_v2ray_network_tlshost_$nu
 				[ -n "$(dbus get ssconf_basic_v2ray_network_flow_$nu)" ] && dbus set ssconf_basic_v2ray_network_flow_"$y"="$(dbus get ssconf_basic_v2ray_network_flow_$nu)"  && dbus remove ssconf_basic_v2ray_network_flow_$nu
 				[ -n "$(dbus get ssconf_basic_naive_protocol_$nu)" ] && dbus set ssconf_basic_naive_protocol_"$y"="$(dbus get ssconf_basic_naive_protocol_$nu)" && dbus remove ssconf_basic_naive_protocol_$nu
@@ -1505,7 +1499,7 @@ get_oneline_rule_now(){
 	
 	if [ "$ss_basic_online_links_goss" == "1" ];then
 		open_socks_23456
-		socksopen_b=`netstat -nlp|grep -w 23456|grep -E "local|v2ray|xray|trojan-go|naive|hysteria"`
+		socksopen_b=`netstat -nlp|grep -w 23456|grep -E "local|xray|trojan-go|naive|hysteria"`
 		if [ -n "$socksopen_b" ];then
 			echo_date "使用$(get_type_name $ss_basic_type)提供的socks代理网络下载..."
 			curl -k --connect-timeout 8 -s -L --socks5-hostname 127.0.0.1:23456 $ssr_subscribe_link > /tmp/ssr_subscribe_file.txt
@@ -1777,7 +1771,6 @@ start_update(){
 						dbus remove ssconf_basic_v2ray_security_$conf_nu
 						dbus remove ssconf_basic_v2ray_use_json_$conf_nu
 						dbus remove ssconf_basic_v2ray_uuid_$conf_nu
-						dbus remove ssconf_basic_v2ray_xray_$conf_nu
 						dbus remove ssconf_basic_weight_$conf_nu
 						dbus remove ssconf_basic_naive_protocol_$conf_nu
 						dbus remove ssconf_basic_naive_user_$conf_nu
@@ -1940,7 +1933,6 @@ remove_online(){
 		dbus remove ssconf_basic_v2ray_security_$remove_nu
 		dbus remove ssconf_basic_v2ray_use_json_$remove_nu
 		dbus remove ssconf_basic_v2ray_uuid_$remove_nu
-		dbus remove ssconf_basic_v2ray_xray_$remove_nu
 		dbus remove ssconf_basic_weight_$remove_nu
 		dbus remove ssconf_basic_naive_protocol_$remove_nu
 		dbus remove ssconf_basic_naive_user_$remove_nu

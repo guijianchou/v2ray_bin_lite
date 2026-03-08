@@ -308,7 +308,9 @@ function buildOutboundsFromSelection(selectedIds){
 				streamSettings: {
 					network: "tcp",
 					security: "tls",
-					tlsSettings: { allowInsecure: false }
+					tlsSettings: {
+						allowInsecure: (c.allowinsecure === "1")  
+					}
 				}
 			};
 

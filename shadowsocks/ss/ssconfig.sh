@@ -161,13 +161,6 @@ restore_conf(){
 }
 
 kill_process(){
-	v2ray_process=`pidof v2ray`
-	if [ -n "$v2ray_process" ];then 
-		echo_date 关闭V2Ray进程...
-		# 有时候killall杀不了v2ray进程，所以用不同方式杀两次
-		killall v2ray >/dev/null 2>&1
-		kill -9 "$v2ray_process" >/dev/null 2>&1
-	fi
 	xray_process=`pidof xray`
 	if [ -n "$xray_process" ];then 
 		echo_date 关闭XRay进程...
@@ -304,11 +297,6 @@ kill_process(){
 		echo_date 关闭haveged进程...
 		killall haveged >/dev/null 2>&1
 	fi
-	plugin_process=`pidof v2ray-plugin`
-	if [ -n "$plugin_process" ];then 
-		echo_date 关闭v2ray-plugin进程...
-		killall v2ray-plugin >/dev/null 2>&1
-	fi
 }
 
 # ================================= ss prestart ===========================
@@ -379,9 +367,7 @@ resolv_server_ip(){
 ss_arg(){
 	# v2ray-plugin
 	if [ -n "$ss_basic_ss_v2ray_plugin_opts" ];then
-		if [ "$ss_basic_ss_v2ray_plugin" == "1" ];then
-			ARG_V2RAY_PLUGIN="--plugin v2ray-plugin --plugin-opts $ss_basic_ss_v2ray_plugin_opts"
-		elif [ "$ss_basic_ss_v2ray_plugin" == "2" ];then
+		if [ "$ss_basic_ss_v2ray_plugin" == "2" ];then
 			ARG_V2RAY_PLUGIN="--plugin obfs-local --plugin-opts $ss_basic_ss_v2ray_plugin_opts"	
 		else
 			ARG_V2RAY_PLUGIN=""
@@ -552,7 +538,7 @@ start_dns(){
 		public_ip=`nvram get wan0_realip_ip`
 		if [ -z "$public_ip" ];then
 			# 路由公网ip为空则获取
-			public_ip=`curl --connect-timeout 1 --retry 0 --max-time 1 -s 'http://members.3322.org/dyndns/getip'`
+			public_ip=`curl --connect-timeout 1 --retry 0 --max-time 1 -sk 'http://members.3322.org/dyndns/getip'`
 			if [ "$?" == "0" ] && [ -n "$public_ip" ];then
 				# 获取成功
 				echo_date 你的公网ip地址是：$public_ip
@@ -605,7 +591,7 @@ start_dns(){
 				ss-tunnel -c $CONFIG_FILE -l $DNSF_PORT -L $ss_sstunnel_user $ARG_V2RAY_PLUGIN -u -f /var/run/sstunnel.pid >/dev/null 2>&1
 			fi
 		elif [ "$ss_basic_type" == "3" ] || [ "$ss_basic_type" == "4" ];then
-			echo_date V2Ray或Trojan 下不支持ss-tunnel，改用dns2socks！
+			echo_date V2Ray 或 Trojan 下不支持 ss-tunnel，改用 dns2socks！
 			dbus set ss_foreign_dns=3
 			start_sslocal
 			echo_date 开启dns2socks，用于dns解析...
@@ -1856,18 +1842,13 @@ create_v2ray_json(){
 	fi
 
 	cd /koolshare/bin
-	if [ "$ss_basic_v2ray_xray" == "xray" ] ; then
-		echo_date 测试XRay配置文件.....
-		result=$(xray -test -config="$V2RAY_CONFIG_FILE" | grep "Configuration OK.")
-	else
-		echo_date 测试V2Ray配置文件.....
-		result=$(v2ray -test -config="$V2RAY_CONFIG_FILE" | grep "Configuration OK.")
-	fi
+	result=$(xray -test -config="$V2RAY_CONFIG_FILE" | grep "Configuration OK.")
+
 	if [ -n "$result" ]; then
 		echo_date $result
-		echo_date V2Ray/Xray配置文件通过测试!!!
+		echo_date Xray配置文件通过测试!!!
 	else
-		echo_date V2Ray/Xray配置文件没有通过测试，请检查设置!!!
+		echo_date Xray配置文件没有通过测试，请检查设置!!!
 		rm -rf "$V2RAY_CONFIG_FILE_TMP"
 		rm -rf "$V2RAY_CONFIG_FILE"
 		close_in_five
@@ -2173,29 +2154,8 @@ create_hy2_json(){
 	fi
 }
 
-start_v2ray() {
-	# v2ray start
-	cd /koolshare/bin
-	#export GOGC=30
-	v2ray -config=/koolshare/ss/v2ray.json >/dev/null 2>&1 &
-	local V2PID
-	local i=10
-	until [ -n "$V2PID" ]; do
-		i=$(($i - 1))
-		V2PID=$(pidof v2ray)
-		if [ "$i" -lt 1 ]; then
-			echo_date "v2ray进程启动失败！"
-			close_in_five
-		fi
-		sleep 1
-	done
-	echo_date v2ray启动成功，pid：$V2PID
-}
-
-start_v2ray_xray() {
-	if [ "$ss_basic_v2ray_xray" == "v2ray" ]; then
-		start_v2ray
-	elif [ "$ss_basic_type" == "4" ]; then
+start_xray_core() {
+	if [ "$ss_basic_type" == "4" ]; then
 		start_trojan
 	elif [ "$SS2022" == "Y" ]; then
 		start_ss2022		
@@ -2205,7 +2165,7 @@ start_v2ray_xray() {
 }
 
 start_xray() {
-	# v2ray start
+	# xray start
 	cd /koolshare/bin
 	#export GOGC=30
 	xray run -config=/koolshare/ss/v2ray.json >/dev/null 2>&1 &
@@ -2215,7 +2175,7 @@ start_xray() {
 		i=$(($i - 1))
 		xrayPID=$(pidof xray)
 		if [ "$i" -lt 1 ]; then
-			echo_date "xray进程启动失败！"
+			echo_date "xray 进程启动失败！"
 			close_in_five
 		fi
 		sleep 1
@@ -2408,8 +2368,20 @@ flush_nat(){
 	iptables -t nat -F OUTPUT > /dev/null 2>&1
 	iptables -t nat -X SHADOWSOCKS_EXT > /dev/null 2>&1
 	#iptables -t nat -D PREROUTING -p udp -s $(get_lan_cidr) --dport 53 -j DNAT --to $lan_ipaddr >/dev/null 2>&1
-	chromecast_nu=`iptables -t nat -L PREROUTING -v -n --line-numbers|grep "dpt:53"|awk '{print $1}'`
-	[ -n "$chromecast_nu" ] && iptables -t nat -D PREROUTING $chromecast_nu >/dev/null 2>&1
+	# 清理DNS劫持规则和链
+	chromecast_nu=`iptables -t nat -L PREROUTING -v -n --line-numbers|grep "SHADOWSOCKS_DNS_"|awk '{print $1}'|sort -r`
+	if [ -n "$chromecast_nu" ]; then
+		for chromecast_index in $chromecast_nu
+		do
+			iptables -t nat -D PREROUTING $chromecast_index >/dev/null 2>&1
+		done
+	fi
+	VLAN_INDEXS=$(ifconfig | grep -E "^br" | awk '{print $1}' | sed 's/^br//g')
+	for VLAN_INDEX in $VLAN_INDEXS
+	do
+		iptables -t nat -F SHADOWSOCKS_DNS_${VLAN_INDEX} >/dev/null 2>&1 && iptables -t nat -X SHADOWSOCKS_DNS_${VLAN_INDEX} >/dev/null 2>&1
+	done
+
 	iptables -t mangle -D QOSO0 -m mark --mark "$ip_prefix_hex" -j RETURN >/dev/null 2>&1
 	# flush ipset
 	ipset -F chnroute >/dev/null 2>&1 && ipset -X chnroute >/dev/null 2>&1
@@ -2687,15 +2659,38 @@ apply_nat_rules(){
 	fi
 }
 
-chromecast(){
-	chromecast_nu=`iptables -t nat -L PREROUTING -v -n --line-numbers|grep "dpt:53"|awk '{print $1}'`
+dns_hijack_control(){
 	if [ "$ss_basic_dns_hijack" == "1" ];then
-		if [ -z "$chromecast_nu" ]; then
-			iptables -t nat -A PREROUTING -p udp -s $(get_lan_cidr) --dport 53 -j DNAT --to $lan_ipaddr >/dev/null 2>&1
-			echo_date 开启DNS劫持功能功能，防止DNS污染...
-		else
-			echo_date DNS劫持规则已经添加，跳过~
-		fi
+		local VLAN_INDEXS=$(ifconfig | grep -E "^br" | awk '{print $1}' | sed 's/^br//g')
+		for VLAN_INDEX in ${VLAN_INDEXS}
+		do
+			local dest_ipaddr=$(ifconfig br${VLAN_INDEX} | grep "inet addr" | awk '{print $2}'|awk -F ":" '{print $2}')
+			iptables -t nat -N SHADOWSOCKS_DNS_${VLAN_INDEX} >/dev/null 2>&1
+			iptables -t nat -F SHADOWSOCKS_DNS_${VLAN_INDEX} >/dev/null 2>&1
+			iptables -t nat -A SHADOWSOCKS_DNS_${VLAN_INDEX} -p udp -j DNAT --to ${dest_ipaddr}:53
+		done
+	fi
+}
+
+
+chromecast(){
+	chromecast_nu=`iptables -t nat -L PREROUTING -v -n --line-numbers|grep "SHADOWSOCKS_DNS_"|awk '{print $1}'|sort -r`
+	if [ -n "$chromecast_nu" ]; then
+		for chromecast_index in $chromecast_nu
+		do
+			iptables -t nat -D PREROUTING $chromecast_index >/dev/null 2>&1
+		done
+	fi
+	if [ "$ss_basic_dns_hijack" == "1" ];then
+		echo_date 开启DNS劫持功能功能，防止DNS污染...
+		dns_hijack_control
+		local VLAN_INDEXS=$(ifconfig | grep -E "^br" | awk '{print $1}' | sed 's/^br//g')
+		local INSET_NU_DNS=$((${INSET_NU} + 1))
+		for VLAN_INDEX in ${VLAN_INDEXS}
+		do
+			iptables -t nat -I PREROUTING "${INSET_NU_DNS}" -i br${VLAN_INDEX} -p udp -m udp --dport 53 -j SHADOWSOCKS_DNS_${VLAN_INDEX}
+			let INSET_NU_DNS+=1
+		done
 	else
 		echo_date DNS劫持功能未开启，建议开启！
 	fi
@@ -2989,7 +2984,7 @@ apply_ss(){
 	[ -z "$WAN_ACTION" ] && [ "$ss_basic_type" = "4" -a "$ss_basic_trojan_binary" == "Hysteria2" ] && create_hy2_json
 	[ "$ss_basic_type" == "0" ] || [ "$ss_basic_type" == "1" ] && start_ss_redir
 	[ "$ss_basic_type" == "2" ] && start_koolgame
-	[ "$ss_basic_type" == "3" ] || [ "$ss_basic_type" == "4" -a "$ss_basic_trojan_binary" == "Trojan" ] && start_v2ray_xray
+	[ "$ss_basic_type" == "3" ] || [ "$ss_basic_type" == "4" -a "$ss_basic_trojan_binary" == "Trojan" ] && start_xray_core
 	[ "$ss_basic_type" == "4" -a "$ss_basic_trojan_binary" == "Trojan-Go" ] && start_trojango
 	[ "$ss_basic_type" == "5" ] && start_naiveproxy
 	[ "$ss_basic_type" == "4" -a "$ss_basic_trojan_binary" == "Hysteria2" ] && start_hy2

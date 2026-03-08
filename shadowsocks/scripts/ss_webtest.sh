@@ -102,7 +102,7 @@ create_v2ray_json(){
 	# ============================
 	local use_json=$(eval echo \$ssconf_basic_v2ray_use_json_$nu)
 	if [ "$use_json" = "1" ]; then
-		echo_date "webtest: 使用自定义 v2ray json 节点..."
+		echo_date "webtest: 使用自定义 'v2ray' json 节点..."
 
 		# 解码用户 json（系统里应该已有 base64_decode）
 		local RAW_JSON=$(eval echo \$ssconf_basic_v2ray_json_$nu | base64_decode)
@@ -665,7 +665,7 @@ start_webtest(){
 	array14=`dbus get ssconf_basic_trojan_binary_$nu`
 	array15=`dbus get ssconf_basic_naive_protocol_$nu`
 	array16=`dbus get ssconf_basic_naive_user_$nu`
-	array17=`dbus get ssconf_basic_v2ray_xray_$nu`
+
 
 	if [ "$array12" == "0" ];then
 		case $array4 in

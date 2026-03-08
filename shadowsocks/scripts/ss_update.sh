@@ -10,13 +10,13 @@ eval `dbus export ss`
 alias echo_date='echo 【$(TZ=UTC-8 date -R +%Y年%m月%d日\ %X)】:'
 main_url="https://raw.githubusercontent.com/cary-sas/v2ray_bin/main/380_armv5_packge"
 backup_url=""
-socksopen_b=`netstat -nlp | grep -w 23456|grep -E "local|v2ray|xray|trojan-go|naive"`
+socksopen_b=`netstat -nlp | grep -w 23456|grep -E "local|xray|trojan-go|naive"`
 if [ -n "$socksopen_b" ] && [ "$ss_basic_online_links_goss" == "1" ];then
 	echo_date "代理有开启，将使用代理网络..."
-	alias curlxx='curl --connect-timeout 8  --socks5-hostname 127.0.0.1:23456 '
+	alias curlxx='curl --connect-timeout 8 -k --socks5-hostname 127.0.0.1:23456 '
 else
 	echo_date "使用常规网络下载..."
-	alias curlxx='curl --connect-timeout 8 '
+	alias curlxx='curl --connect-timeout 8 -k 380_armv5/simple-obfs/curl'
 fi
 
 install_ss(){
@@ -39,7 +39,7 @@ update_ss(){
 		if [ "$ss_basic_version_local" != "$ss_basic_version_web1" ];then
 		echo_date 主服务器在线版本号："$ss_basic_version_web1" 和本地版本号："$ss_basic_version_local" 不同！
 			cd /tmp
-			md5_web1=`curl -s "$main_url"/$ss_basic_version_web1/md5sum.txt | sed -n 1p`
+			md5_web1=`curlxx -s "$main_url"/$ss_basic_version_web1/md5sum.txt | sed -n 1p`
 			echo_date 开启下载进程，从主服务器上下载更新包...
 			#wget --no-check-certificate --timeout=5 "$main_url"/$ss_basic_version_web1/shadowsocks.tar.gz
 			curlxx -o /tmp/shadowsocks.tar.gz "$main_url"/$ss_basic_version_web1/shadowsocks.tar.gz

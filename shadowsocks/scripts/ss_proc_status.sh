@@ -90,17 +90,6 @@ get_action_chain() {
 echo_version(){
 	echo_date
 	SOFVERSION=`cat /koolshare/ss/version`
-	##---------------------------v2ray-----------------------
-	if [ -z "$ss_basic_v2ray_version" ];then
-		ss_basic_v2ray_version_tmp=`/koolshare/bin/v2ray -version 2>/dev/null | head -n 1 | cut -d " " -f2`
-		if [ -n "$ss_basic_v2ray_version_tmp" ];then
-			ss_basic_v2ray_version="$ss_basic_v2ray_version_tmp"
-			dbus set ss_basic_v2ray_version="$ss_basic_v2ray_version_tmp"
-		else
-			ss_basic_v2ray_version="null"
-		fi
-	fi
-	
 	##---------------------------xray-----------------------
 	if [ -z "$ss_basic_xray_version" ];then
 		ss_basic_xray_version_tmp=`/koolshare/bin/xray -version 2>/dev/null | head -n 1 | cut -d " " -f2`
@@ -162,7 +151,6 @@ echo_version(){
 	echo "chinadns2		2.0.0 		2017年12月09日编译"
 	echo "ChinaDNS-NG		1.0-beta.25 	2019年08月31日编译"
 	echo "client_linux_arm5	20210922	kcptun"
-	echo "v2ray			$ss_basic_v2ray_version	"	
 	echo "xray			$ss_basic_xray_version	"	
 	echo "trojan-go		$ss_basic_trojango_version		2022年12月29日编译"
 	echo "naive		$ss_basic_naive_version	"

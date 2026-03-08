@@ -438,7 +438,7 @@ function openssHint(itemNum) {
 		statusmenu += "</br></br><font color='#CC0066'>1&nbsp;&nbsp;</font>进入<a href='Tools_Shell.asp' target='_blank'><u><font color='#00F'>webshell</font></u></a>或者其他telnet,ssh等能输入命令的工具";
 		statusmenu += "</br><font color='#CC0066'>2&nbsp;&nbsp;</font>请依次输入以下命令，等待上一条命令执行完后再运行下一条(这里以回滚4.35.6为例)：";
 		statusmenu += "</br></br>&nbsp;&nbsp;&nbsp;&nbsp;cd /tmp";
-		statusmenu += "</br>&nbsp;&nbsp;&nbsp;&nbsp;curl -LJO https://raw.githubusercontent.com/cary-sas/v2ray_bin/main/380_armv5_packge/4.35.6/shadowsocks.tar.gz";
+		statusmenu += "</br>&nbsp;&nbsp;&nbsp;&nbsp;curl -kLJO https://raw.githubusercontent.com/cary-sas/v2ray_bin/main/380_armv5_packge/4.35.6/shadowsocks.tar.gz";
 		statusmenu += "</br>&nbsp;&nbsp;&nbsp;&nbsp;mv shadowsocks_4.1.7.tar.gz shadowsocks.tar.gz";
 		statusmenu += "</br>&nbsp;&nbsp;&nbsp;&nbsp;tar -zxvf /tmp/shadowsocks.tar.gz";
 		statusmenu += "</br>&nbsp;&nbsp;&nbsp;&nbsp;chmod +x /tmp/shadowsocks/install.sh";
@@ -801,15 +801,11 @@ function openssHint(itemNum) {
 		width = "600px";
 		statusmenu = "节点域名解析DNS服务器.<br />&nbsp;&nbsp;&nbsp;&nbsp;一些SS/SSR/V2RAY的服务器为域名格式，在启用的时候需要对其进行解析，以获取正确的IP地址，此处定义用以解析服务器域名的DNS服务器。<br />&nbsp;&nbsp;&nbsp;&nbsp;一些机场节点的域名托管在国外服务商，此时自定义定义国外的DNS服务器效果可能更好。"
 		_caption = "说明：";
-	}else if (itemNum == 108) {
-		width = "550px";
-		statusmenu = "</br>此参数为选择执行二进制v2ray或者xray,如果不清楚，请选择xray"
-		_caption = "二进制（V2ray/Xray）";
-	}else if (itemNum == 109) {
+	} else if (itemNum == 109) {
 		width = "450px";
 		statusmenu = "</br>选择对应的协议"
 		_caption = "协议protocol（vmess/vless/trojan）";
-	}else if (itemNum == 211) {
+	} else if (itemNum == 211) {
 		width = "550px";
 		statusmenu = "</br>leastPing：自动选择延迟最低的节点（推荐，最稳定）</br>roundRobin：节点轮流使用，适合多节点均衡</br>random：随机选择节点，不保证稳定性"
 		_caption = "Xray 聚合策略";		
