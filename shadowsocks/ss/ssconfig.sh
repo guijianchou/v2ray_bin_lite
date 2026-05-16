@@ -2125,30 +2125,66 @@ create_ss2022_json(){
 
 
 create_hy2_json(){
-	rm -f "$HY2_CONFIG_FILE" 
+	rm -f "$HY2_CONFIG_FILE"
 	if  [ "$ss_basic_type" == "4" ] && [ "$ss_basic_trojan_binary" == "Hysteria2" ]; then
-	
 		echo_date 生成Hysteria2配置文件...
-		 #HY2
 
-	cat >"$HY2_CONFIG_FILE" <<-EOF		
+		local hy2_obfs_type="$ss_basic_hy2_obfs_type"
+		local hy2_obfs_password="$ss_basic_hy2_obfs_password"
+		local hy2_up_mbps="$ss_basic_hy2_up_mbps"
+		local hy2_down_mbps="$ss_basic_hy2_down_mbps"
+		local hy2_has_obfs="false"
+		local hy2_has_bandwidth="false"
+
+		[ "$hy2_obfs_type" == "salamander" ] && [ -n "$hy2_obfs_password" ] && hy2_has_obfs="true"
+		echo "$hy2_up_mbps" | grep -Eq '^[1-9][0-9]*$' && echo "$hy2_down_mbps" | grep -Eq '^[1-9][0-9]*$' && hy2_has_bandwidth="true"
+
+		jq -n \
+			--arg server "$(dbus get ss_basic_server):$ss_basic_port" \
+			--arg auth "$ss_basic_password" \
+			--arg sni "$ss_basic_trojan_sni" \
+			--argjson insecure "$(get_function_switch $ss_basic_allowinsecure)" \
+			--arg obfs_password "$hy2_obfs_password" \
+			--arg up "$hy2_up_mbps" \
+			--arg down "$hy2_down_mbps" \
+			--argjson has_obfs "$hy2_has_obfs" \
+			--argjson has_bandwidth "$hy2_has_bandwidth" '
 			{
-				"server": "$(dbus get ss_basic_server):$ss_basic_port",
-				"auth": "${ss_basic_password}",
-				"tls": {
-					"sni": "$ss_basic_trojan_sni",
-					"insecure": $(get_function_switch $ss_basic_allowinsecure)
+				server: $server,
+				auth: $auth,
+				tls: {
+					sni: $sni,
+					insecure: $insecure
 				},
-				"fastOpen": true,
-				"lazy": true,
-				"socks5": {
-					"listen": "127.0.0.1:23456"
+				fastOpen: true,
+				lazy: true,
+				socks5: {
+					listen: "127.0.0.1:23456"
 				},
-				"tcpRedirect": {
-					"listen": "0.0.0.0:3333"
+				tcpRedirect: {
+					listen: "0.0.0.0:3333"
 				}
 			}
-	EOF
+			+ (if $has_obfs then {
+				obfs: {
+					type: "salamander",
+					salamander: {
+						password: $obfs_password
+					}
+				}
+			} else {} end)
+			+ (if $has_bandwidth then {
+				bandwidth: {
+					up: ($up + " mbps"),
+					down: ($down + " mbps")
+				}
+			} else {} end)
+			' > "$HY2_CONFIG_FILE"
+
+		if [ "$?" != "0" ] || [ ! -s "$HY2_CONFIG_FILE" ]; then
+			echo_date "Hysteria2 配置文件 JSON 生成失败！"
+			close_in_five
+		fi
 
 		echo_date Hysteria2 配置文件写入成功到 "$HY2_CONFIG_FILE"
 	fi

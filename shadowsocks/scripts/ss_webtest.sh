@@ -585,23 +585,56 @@ create_naive_json(){
 }
 
 create_hy2_json(){
-	rm -f /tmp/tmp_hysteria.json 
+	rm -f /tmp/tmp_hysteria.json
 
-	cat >/tmp/tmp_hysteria.json <<-EOF
-				{
-				"server": "${array1}:${array2}",
-				"auth": "${array3}",
-				"tls": {
-					"sni": "$(eval echo \$ssconf_basic_trojan_sni_$nu)",
-					"insecure": $(get_function_switch $(eval echo \$ssconf_basic_allowinsecure_$nu))
-				},
-				"fastOpen": true,
-				"lazy": true,
-				"socks5": {
-					"listen": "127.0.0.1:23458"
+	local hy2_obfs_type="$(dbus get ssconf_basic_hy2_obfs_type_$nu)"
+	local hy2_obfs_password="$(dbus get ssconf_basic_hy2_obfs_password_$nu)"
+	local hy2_up_mbps="$(dbus get ssconf_basic_hy2_up_mbps_$nu)"
+	local hy2_down_mbps="$(dbus get ssconf_basic_hy2_down_mbps_$nu)"
+	local hy2_has_obfs="false"
+	local hy2_has_bandwidth="false"
+
+	[ "$hy2_obfs_type" == "salamander" ] && [ -n "$hy2_obfs_password" ] && hy2_has_obfs="true"
+	echo "$hy2_up_mbps" | grep -Eq '^[1-9][0-9]*$' && echo "$hy2_down_mbps" | grep -Eq '^[1-9][0-9]*$' && hy2_has_bandwidth="true"
+
+	jq -n \
+		--arg server "${array1}:${array2}" \
+		--arg auth "${array3}" \
+		--arg sni "$(eval echo \$ssconf_basic_trojan_sni_$nu)" \
+		--argjson insecure "$(get_function_switch $(eval echo \$ssconf_basic_allowinsecure_$nu))" \
+		--arg obfs_password "$hy2_obfs_password" \
+		--arg up "$hy2_up_mbps" \
+		--arg down "$hy2_down_mbps" \
+		--argjson has_obfs "$hy2_has_obfs" \
+		--argjson has_bandwidth "$hy2_has_bandwidth" '
+		{
+			server: $server,
+			auth: $auth,
+			tls: {
+				sni: $sni,
+				insecure: $insecure
+			},
+			fastOpen: true,
+			lazy: true,
+			socks5: {
+				listen: "127.0.0.1:23458"
+			}
+		}
+		+ (if $has_obfs then {
+			obfs: {
+				type: "salamander",
+				salamander: {
+					password: $obfs_password
 				}
 			}
-	EOF
+		} else {} end)
+		+ (if $has_bandwidth then {
+			bandwidth: {
+				up: ($up + " mbps"),
+				down: ($down + " mbps")
+			}
+		} else {} end)
+		' > /tmp/tmp_hysteria.json
 }
 
 create_ss2022_json(){

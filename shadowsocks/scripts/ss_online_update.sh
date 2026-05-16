@@ -180,6 +180,10 @@ prepare(){
 		[ -n "$(dbus get ssconf_basic_naive_user_$nu)" ] && echo dbus set ssconf_basic_naive_user_$q=$(dbus get ssconf_basic_naive_user_$nu)  >> /tmp/ss_conf.sh
 		[ -n "$(dbus get ssconf_basic_xray_publicKey_$nu)" ] && echo dbus set ssconf_basic_xray_publicKey_$q=$(dbus get ssconf_basic_xray_publicKey_$nu)  >> /tmp/ss_conf.sh
 		[ -n "$(dbus get ssconf_basic_xray_shortId_$nu)" ] && echo dbus set ssconf_basic_xray_shortId_$q=$(dbus get ssconf_basic_xray_shortId_$nu)  >> /tmp/ss_conf.sh
+		[ -n "$(dbus get ssconf_basic_hy2_obfs_type_$nu)" ] && echo dbus set ssconf_basic_hy2_obfs_type_$q=$(dbus get ssconf_basic_hy2_obfs_type_$nu)  >> /tmp/ss_conf.sh
+		[ -n "$(dbus get ssconf_basic_hy2_obfs_password_$nu)" ] && echo dbus set ssconf_basic_hy2_obfs_password_$q=$(dbus get ssconf_basic_hy2_obfs_password_$nu)  >> /tmp/ss_conf.sh
+		[ -n "$(dbus get ssconf_basic_hy2_up_mbps_$nu)" ] && echo dbus set ssconf_basic_hy2_up_mbps_$q=$(dbus get ssconf_basic_hy2_up_mbps_$nu)  >> /tmp/ss_conf.sh
+		[ -n "$(dbus get ssconf_basic_hy2_down_mbps_$nu)" ] && echo dbus set ssconf_basic_hy2_down_mbps_$q=$(dbus get ssconf_basic_hy2_down_mbps_$nu)  >> /tmp/ss_conf.sh
 
 		echo "#------------------------" >> /tmp/ss_conf.sh
 		if [ "$nu" == "$ssconf_basic_node" ];then
@@ -223,6 +227,15 @@ base64decode_link(){
 #urldecode(){ : "${*//+/ }"; echo -e "${_//%/\\x}"; }
 urldecode(){
 	printf '%b\n' "$(sed 's/\\/\\\\/g;s/\(%\)\([0-9a-fA-F][0-9a-fA-F]\)/\\x\2/g')"
+}
+
+get_uri_param(){
+	local key="$1"
+	echo "$decode_link" | tr '?#&' '\n' | grep -m1 "^${key}=" | cut -d'=' -f2- | urldecode
+}
+
+normalize_mbps(){
+	echo "$1" | sed 's/%20/ /g' | awk '{print $1}' | grep -Eo '^[1-9][0-9]*'
 }
 
 dbus_update_if_diff() {
@@ -871,8 +884,27 @@ get_hysteria2_config(){
 	password=$(echo "$decode_link" |awk -F':' '{print $1}'|awk -F'@' '{print $1}')
 	password=`echo $password|base64_encode`
 	#20201024+++
-	sni=$(echo "$decode_link" | tr '?#&' '\n' | grep 'sni=' | awk -F'=' '{print $2}')
-	insecure=$(echo "$decode_link" | tr '?#&' '\n' | grep 'insecure=' | awk -F'=' '{print $2}')
+	sni=$(get_uri_param sni)
+	insecure=$(get_uri_param insecure)
+	case "$insecure" in
+		1|true|TRUE|True)
+			insecure=1
+		;;
+		*)
+			insecure=0
+		;;
+	esac
+	hy2_obfs_type="$(get_uri_param obfs)"
+	hy2_obfs_password="$(get_uri_param obfs-password)"
+	hy2_up_mbps="$(get_uri_param upmbps)"
+	hy2_down_mbps="$(get_uri_param downmbps)"
+	[ -z "$hy2_up_mbps" ] && hy2_up_mbps="$(get_uri_param up)"
+	[ -z "$hy2_up_mbps" ] && hy2_up_mbps="$(get_uri_param upload)"
+	[ -z "$hy2_down_mbps" ] && hy2_down_mbps="$(get_uri_param down)"
+	[ -z "$hy2_down_mbps" ] && hy2_down_mbps="$(get_uri_param download)"
+	[ "$hy2_obfs_type" != "salamander" ] && hy2_obfs_type=""
+	hy2_up_mbps="$(normalize_mbps "$hy2_up_mbps")"
+	hy2_down_mbps="$(normalize_mbps "$hy2_down_mbps")"
 	v2ray_net=0
 	binary="Hysteria2"
 #	echo_date "服务器：$server" >> $LOG_FILE
@@ -918,6 +950,10 @@ add_hysteria2_servers(){
 	dbus set ssconf_basic_trojan_sni_$hysteria2index=$sni
 	dbus set ssconf_basic_trojan_network_$hysteria2index=$v2ray_net
 	dbus set ssconf_basic_allowinsecure_$hysteria2index=$insecure
+	dbus set "ssconf_basic_hy2_obfs_type_$hysteria2index=$hy2_obfs_type"
+	dbus set "ssconf_basic_hy2_obfs_password_$hysteria2index=$hy2_obfs_password"
+	dbus set "ssconf_basic_hy2_up_mbps_$hysteria2index=$hy2_up_mbps"
+	dbus set "ssconf_basic_hy2_down_mbps_$hysteria2index=$hy2_down_mbps"
 
 	echo_date "Hysteria2 节点：新增加 【$remarks】 到节点列表第 $hysteria2index_x 位。"
 }
@@ -946,6 +982,10 @@ update_hysteria2_config(){
 		dbus_update_if_diff "ssconf_basic_trojan_network_$index" "$v2ray_net" && i=$((i+1))
 		dbus_update_if_diff "ssconf_basic_trojan_sni_$index" "$sni" && i=$((i+1))
 		dbus_update_if_diff "ssconf_basic_allowinsecure_$index" "$insecure" && i=$((i+1))
+		dbus_update_if_diff "ssconf_basic_hy2_obfs_type_$index" "$hy2_obfs_type" && i=$((i+1))
+		dbus_update_if_diff "ssconf_basic_hy2_obfs_password_$index" "$hy2_obfs_password" && i=$((i+1))
+		dbus_update_if_diff "ssconf_basic_hy2_up_mbps_$index" "$hy2_up_mbps" && i=$((i+1))
+		dbus_update_if_diff "ssconf_basic_hy2_down_mbps_$index" "$hy2_down_mbps" && i=$((i+1))
 
 		if [ "$i" -gt "0" ]; then
 		echo_date "修改 Hysteria2 节点：【$remarks】" && let updatenum7+=1 && let updatenum+=1
@@ -953,6 +993,18 @@ update_hysteria2_config(){
 		echo_date "Hysteria2 节点：【$remarks】 参数未发生变化，跳过！"
 		fi
 	fi
+}
+
+get_hy2_config(){
+	get_hysteria2_config "$@"
+}
+
+add_hy2_servers(){
+	add_hysteria2_servers "$@"
+}
+
+update_hy2_config(){
+	update_hysteria2_config "$@"
 }
 
 ##################################################################################################
@@ -1338,6 +1390,10 @@ del_none_exist(){
 					dbus remove ssconf_basic_naive_user_$localindex
 					dbus remove ssconf_basic_xray_publicKey_$localindex
 					dbus remove ssconf_basic_xray_shortId_$localindex
+					dbus remove ssconf_basic_hy2_obfs_type_$localindex
+					dbus remove ssconf_basic_hy2_obfs_password_$localindex
+					dbus remove ssconf_basic_hy2_up_mbps_$localindex
+					dbus remove ssconf_basic_hy2_down_mbps_$localindex
 				let delnum+=1
 			fi 
 			done
@@ -1432,6 +1488,10 @@ remove_node_gap(){
 				[ -n "$(dbus get ssconf_basic_naive_user_$nu)" ] && dbus set ssconf_basic_naive_user_"$y"="$(dbus get ssconf_basic_naive_user_$nu)" && dbus remove ssconf_basic_naive_user_$nu
 				[ -n "$(dbus get ssconf_basic_xray_publicKey_$nu)" ] && dbus set ssconf_basic_xray_publicKey_"$y"="$(dbus get ssconf_basic_xray_publicKey_$nu)" && dbus remove ssconf_basic_xray_publicKey_$nu
 				[ -n "$(dbus get ssconf_basic_xray_shortId_$nu)" ] && dbus set ssconf_basic_xray_shortId_"$y"="$(dbus get ssconf_basic_xray_shortId_$nu)" && dbus remove ssconf_basic_xray_shortId_$nu
+				[ -n "$(dbus get ssconf_basic_hy2_obfs_type_$nu)" ] && dbus set ssconf_basic_hy2_obfs_type_"$y"="$(dbus get ssconf_basic_hy2_obfs_type_$nu)" && dbus remove ssconf_basic_hy2_obfs_type_$nu
+				[ -n "$(dbus get ssconf_basic_hy2_obfs_password_$nu)" ] && dbus set ssconf_basic_hy2_obfs_password_"$y"="$(dbus get ssconf_basic_hy2_obfs_password_$nu)" && dbus remove ssconf_basic_hy2_obfs_password_$nu
+				[ -n "$(dbus get ssconf_basic_hy2_up_mbps_$nu)" ] && dbus set ssconf_basic_hy2_up_mbps_"$y"="$(dbus get ssconf_basic_hy2_up_mbps_$nu)" && dbus remove ssconf_basic_hy2_up_mbps_$nu
+				[ -n "$(dbus get ssconf_basic_hy2_down_mbps_$nu)" ] && dbus set ssconf_basic_hy2_down_mbps_"$y"="$(dbus get ssconf_basic_hy2_down_mbps_$nu)" && dbus remove ssconf_basic_hy2_down_mbps_$nu
 
 				usleep 100000
 				# change node nu
@@ -1552,7 +1612,7 @@ get_oneline_rule_now(){
 		fi
 
 
-		NODE_NU_online=$(</tmp/ssr_subscribe_file_temp1.txt grep -cE '^ss://|^ssr://|^vmess://|^trojan://|^vless://|^trojan-go://|^hysteria2://')
+		NODE_NU_online=$(</tmp/ssr_subscribe_file_temp1.txt grep -cE '^ss://|^ssr://|^vmess://|^trojan://|^vless://|^trojan-go://|^hysteria2://|^hy2://')
 		echo_date "检测到ShadowSocks节点格式，共计${NODE_NU_online}个节点..."
 
 		if [  "$NODE_NU_online" = "0" ] ; then
@@ -1568,7 +1628,7 @@ get_oneline_rule_now(){
 			remarks='AutoSuB'
 			group_index=$((url_count*1000))
 			# 提取节点
-			grep -E '^ss://|^ssr://|^vmess://|^trojan://|^vless://|^trojan-go://|^hysteria2://' /tmp/ssr_subscribe_file_temp1.txt >  /tmp/ssr_subscribe_file_temp2.txt &&  mv  /tmp/ssr_subscribe_file_temp2.txt  /tmp/ssr_subscribe_file_temp1.txt
+			grep -E '^ss://|^ssr://|^vmess://|^trojan://|^vless://|^trojan-go://|^hysteria2://|^hy2://' /tmp/ssr_subscribe_file_temp1.txt >  /tmp/ssr_subscribe_file_temp2.txt &&  mv  /tmp/ssr_subscribe_file_temp2.txt  /tmp/ssr_subscribe_file_temp1.txt
 			
 			# 检测ss ssr vmess trojan vless trojan-go hysteria2 
 			while read -r line
@@ -1938,6 +1998,10 @@ remove_online(){
 		dbus remove ssconf_basic_naive_user_$remove_nu
 		dbus remove ssconf_basic_xray_publicKey_$remove_nu
 		dbus remove ssconf_basic_xray_shortId_$remove_nu
+		dbus remove ssconf_basic_hy2_obfs_type_$remove_nu
+		dbus remove ssconf_basic_hy2_obfs_password_$remove_nu
+		dbus remove ssconf_basic_hy2_up_mbps_$remove_nu
+		dbus remove ssconf_basic_hy2_down_mbps_$remove_nu
 	done
 }
 
