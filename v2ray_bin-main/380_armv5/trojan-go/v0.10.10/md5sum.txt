@@ -1,1 +1,0 @@
-db85c1f3868cb4aca36579582afa487f  trojan-go
