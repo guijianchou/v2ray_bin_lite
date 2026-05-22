@@ -4155,7 +4155,7 @@ function set_cron(action) {
 																</td>
 															</tr>
 															<tr id="hy2_obfs_type_tr" style="display: none;">
-																<th width="35%">HY2 混淆类型</th>
+																<th width="35%">obfs混淆类型</th>
 																<td>
 																	<select id="ss_node_table_hy2_obfs_type" name="ss_node_table_hy2_obfs_type" style="width:350px;margin:0px 0px 0px 2px;" class="input_option" onchange="verifyFields(this, 1);">
 																		<option value="">不启用</option>
@@ -4164,19 +4164,19 @@ function set_cron(action) {
 																</td>
 															</tr>
 															<tr id="hy2_obfs_password_tr" style="display: none;">
-																<th width="35%">HY2 混淆密码</th>
+																<th width="35%">混淆密码</th>
 																<td>
-																	<input type="text" name="ss_node_table_hy2_obfs_password" id="ss_node_table_hy2_obfs_password" class="input_ss_table" placeholder="obfs-password" style="width:342px;" maxlength="300" value="" />
+																	<input type="password" name="ss_node_table_hy2_obfs_password" id="ss_node_table_hy2_obfs_password" class="input_ss_table" placeholder="obfs-password" style="width:342px;" maxlength="300" value="" autocomplete="off" autocorrect="off" autocapitalize="off" readonly onBlur="switchType(this, false);" onFocus="switchType(this, true);this.removeAttribute('readonly');"/>
 																</td>
 															</tr>
 															<tr id="hy2_up_mbps_tr" style="display: none;">
-																<th width="35%">HY2 上行带宽(Mbps)</th>
+																<th width="35%">上行带宽(Mbps)</th>
 																<td>
 																	<input type="text" name="ss_node_table_hy2_up_mbps" id="ss_node_table_hy2_up_mbps" class="input_ss_table" placeholder="如 20" style="width:120px;" maxlength="8" value="" />
 																</td>
 															</tr>
 															<tr id="hy2_down_mbps_tr" style="display: none;">
-																<th width="35%">HY2 下行带宽(Mbps)</th>
+																<th width="35%">下行带宽(Mbps)</th>
 																<td>
 																	<input type="text" name="ss_node_table_hy2_down_mbps" id="ss_node_table_hy2_down_mbps" class="input_ss_table" placeholder="如 100" style="width:120px;" maxlength="8" value="" />
 																</td>
@@ -4610,7 +4610,7 @@ function set_cron(action) {
 													</td>
 												</tr>
 												<tr id="hy2_obfs_type_basic_tr" style="display: none;">
-													<th width="35%">HY2 混淆类型</th>
+													<th width="35%">obfs混淆类型</th>
 													<td>
 														<select id="ss_basic_hy2_obfs_type" name="ss_basic_hy2_obfs_type" style="width:164px;margin:0px 0px 0px 2px;" class="input_option" onchange="verifyFields(this, 1);">
 															<option value="">不启用</option>
@@ -4619,19 +4619,19 @@ function set_cron(action) {
 													</td>
 												</tr>
 												<tr id="hy2_obfs_password_basic_tr" style="display: none;">
-													<th width="35%">HY2 混淆密码</th>
+													<th width="35%">混淆密码</th>
 													<td>
-														<input type="text" name="ss_basic_hy2_obfs_password" id="ss_basic_hy2_obfs_password" class="input_ss_table" style="width:300px;" placeholder="obfs-password" maxlength="300" value=""/>
+														<input type="password" name="ss_basic_hy2_obfs_password" id="ss_basic_hy2_obfs_password" class="input_ss_table" style="width:300px;" placeholder="obfs-password" maxlength="300" value="" autocomplete="off" autocorrect="off" autocapitalize="off" readonly onBlur="switchType(this, false);" onFocus="switchType(this, true);this.removeAttribute('readonly');"/>
 													</td>
 												</tr>
 												<tr id="hy2_up_mbps_basic_tr" style="display: none;">
-													<th width="35%">HY2 上行带宽(Mbps)</th>
+													<th width="35%">上行带宽(Mbps)</th>
 													<td>
 														<input type="text" name="ss_basic_hy2_up_mbps" id="ss_basic_hy2_up_mbps" class="input_ss_table" style="width:120px;" placeholder="如 20" maxlength="8" value=""/>
 													</td>
 												</tr>
 												<tr id="hy2_down_mbps_basic_tr" style="display: none;">
-													<th width="35%">HY2 下行带宽(Mbps)</th>
+													<th width="35%">下行带宽(Mbps)</th>
 													<td>
 														<input type="text" name="ss_basic_hy2_down_mbps" id="ss_basic_hy2_down_mbps" class="input_ss_table" style="width:120px;" placeholder="如 100" maxlength="8" value=""/>
 													</td>
