@@ -111,18 +111,6 @@ echo_version(){
 			ss_basic_naive_version="null"
 		fi
 	fi
- 
- 	##---------------------------trojan-go-----------------------
-	if [ -z "$ss_basic_trojango_version" ];then
-		ss_basic_trojango_version_tmp=`/koolshare/bin/trojan-go -version 2>/dev/null | head -n 1 | cut -d " " -f2`
-		if [ -n "$ss_basic_trojango_version_tmp" ];then
-			ss_basic_trojango_version="$ss_basic_trojango_version_tmp"
-			dbus set ss_basic_trojango_version="$ss_basic_trojango_version_tmp"
-		else
-			ss_basic_trojango_version="null"
-		fi
-	fi
-
 	##---------------------------hysteria-----------------------
 	if [ -z "$ss_basic_hysteria_version" ];then
 		ss_basic_hysteria_version_tmp=`/koolshare/bin/hysteria version | grep 'Version:' | awk -F'[[:space:]]+' '{print $2}'`
@@ -131,6 +119,17 @@ echo_version(){
 			dbus set ss_basic_hysteria_version="$ss_basic_hysteria_version_tmp"
 		else
 			ss_basic_hysteria_version="null"
+		fi
+	fi
+
+	##---------------------------anytls-----------------------
+	if [ -z "$ss_basic_anytls_version" ];then
+		ss_basic_anytls_version_tmp=`/koolshare/bin/anytls -version 2>/dev/null | head -n 1 | cut -d " " -f2`
+		if [ -n "$ss_basic_anytls_version_tmp" ];then
+			ss_basic_anytls_version="$ss_basic_anytls_version_tmp"
+			dbus set ss_basic_anytls_version="$ss_basic_anytls_version_tmp"
+		else
+			ss_basic_anytls_version="null"
 		fi
 	fi
 
@@ -152,9 +151,9 @@ echo_version(){
 	echo "ChinaDNS-NG		1.0-beta.25 	2019年08月31日编译"
 	echo "client_linux_arm5	20210922	kcptun"
 	echo "xray			$ss_basic_xray_version	"	
-	echo "trojan-go		$ss_basic_trojango_version		2022年12月29日编译"
 	echo "naive		$ss_basic_naive_version	"
 	echo "hysteria		$ss_basic_hysteria_version	"
+	echo "anytls		$ss_basic_anytls_version	"
 	echo -----------------------------------------------------------
 }
 
@@ -178,9 +177,9 @@ check_status(){
 	HAPROXY=`pidof haproxy`
 	V2RAY=`pidof v2ray`
 	XRAY=`pidof xray`
-	TROJANGO=`pidof trojan-go`
 	NAIVE=`pidof naive`
 	HYSTERIA=`pidof hysteria`
+	ANYTLS=`pidof anytls`
 	HDP=`pidof https_dns_proxy`
 	DMQ=`pidof dnsmasq`
 	SMD=$(pidof smartdns)
@@ -224,8 +223,8 @@ check_status(){
 		echo -----------------------------------------------------------
 		echo "程序		状态	PID"
 		[ -n "$XRAY" ] && echo "xray		工作中	pid：$XRAY" || echo "xray	未运行"	
-		[ -n "$TROJANGO" ] && echo "trojan-go		工作中	pid：$TROJANGO" || echo "trojan-go	未运行"	
 		[ -n "$HYSTERIA" ] && echo "Hysteria2		工作中	pid：$HYSTERIA" || echo "Hysteria2	未运行"	
+		[ -n "$ANYTLS" ] && echo "AnyTLS		工作中	pid：$ANYTLS" || echo "AnyTLS	未运行"
 	elif [ "$ss_basic_type" == "5" ];then
 		echo_version
 		echo

@@ -8,15 +8,15 @@ source $KSROOT/scripts/base.sh
 
 eval `dbus export ss`
 alias echo_date='echo 【$(TZ=UTC-8 date -R +%Y年%m月%d日\ %X)】:'
-main_url="https://raw.githubusercontent.com/cary-sas/v2ray_bin/main/380_armv5_packge"
+main_url="https://raw.githubusercontent.com/guijianchou/v2ray_bin_lite/main/380_armv5_packge"
 backup_url=""
-socksopen_b=`netstat -nlp | grep -w 23456|grep -E "local|xray|trojan-go|naive"`
+socksopen_b=`netstat -nlp | grep -w 23456|grep -E "local|xray|naive|hysteria|anytls"`
 if [ -n "$socksopen_b" ] && [ "$ss_basic_online_links_goss" == "1" ];then
 	echo_date "代理有开启，将使用代理网络..."
 	alias curlxx='curl --connect-timeout 8 -k --socks5-hostname 127.0.0.1:23456 '
 else
 	echo_date "使用常规网络下载..."
-	alias curlxx='curl --connect-timeout 8 -k 380_armv5/simple-obfs/curl'
+	alias curlxx='curl --connect-timeout 8 -k '
 fi
 
 install_ss(){
@@ -72,7 +72,7 @@ update_ss(){
 
 update_ss2(){
 	echo_date "目前还没有任何备用服务器！请尝试使用离线安装功能！"
-	echo_date "历史版本下载地址：https://github.com/cary-sas/v2ray_bin/tree/main/380_armv5_packge"
+	echo_date "历史版本下载地址：https://github.com/guijianchou/v2ray_bin_lite/tree/main/380_armv5_packge"
 	echo_date "下载后请将下载包名字改为：shadowsocks.tar.gz，(文件名不要带有空格)，再使用离线安装进行安装"
 	sleep 1
 	exit

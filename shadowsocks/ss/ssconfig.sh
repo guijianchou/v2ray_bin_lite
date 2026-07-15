@@ -13,11 +13,10 @@ LOG_FILE=/tmp/syslog.log
 CONFIG_FILE=/koolshare/ss/ss.json
 V2RAY_CONFIG_FILE_TMP="/tmp/v2ray_tmp.json"
 V2RAY_CONFIG_FILE="/koolshare/ss/v2ray.json"
-TROJANGO_CONFIG_FILE="/koolshare/ss/trojango.json"
-TROJANGO2_CONFIG_FILE="/koolshare/ss/trojango2.json"
 NAIVE_CONFIG_FILE="/koolshare/ss/naive.json"
 NAIVE2_CONFIG_FILE="/koolshare/ss/naive2.json"
 HY2_CONFIG_FILE="/koolshare/ss/hysteria.json"
+HY2_GLOBAL_CONFIG_FILE="/tmp/hysteria_global.json"
 LOCK_FILE=/var/lock/koolss.lock
 DNSF_PORT=7913
 DNSC_PORT=53
@@ -32,7 +31,7 @@ lan_ipaddr=$(nvram get lan_ipaddr)
 ip_prefix_hex=`nvram get lan_ipaddr | awk -F "." '{printf ("0x%02x", $1)} {printf ("%02x", $2)} {printf ("%02x", $3)} {printf ("00/0xffffff00\n")}'`
 [ "$ss_basic_mode" == "4" ] && ss_basic_mode=3
 game_on=`dbus list ss_acl_mode|cut -d "=" -f 2 | grep 3`
-[ -n "$game_on" ] || [ "$ss_basic_mode" == "3" ] || [ "$ss_basic_udp_sync" == "1" ] && mangle=1
+[ -n "$game_on" ] || [ "$ss_basic_mode" == "3" ] || [ "$ss_basic_udp_sync" == "1" ] || [ "$ss_basic_udp_sync" == "2" ] && mangle=1
 ss_basic_password=`echo $ss_basic_password|base64_decode`
 ARG_V2RAY_PLUGIN=""
 
@@ -168,14 +167,6 @@ kill_process(){
 		killall xray >/dev/null 2>&1
 		kill -9 "$xray_process" >/dev/null 2>&1
 	fi
-	trojango_process=`pidof trojan-go`
-	if [ -n "$trojango_process" ];then 
-		echo_date 关闭Trojan-Go进程...
-		# 有时候killall杀不了Trojan-Go进程，所以用不同方式杀两次
-		killall trojan-go >/dev/null 2>&1
-		kill -9 "$trojango_process" >/dev/null 2>&1
-	fi
-
 	ssredir=`pidof ss-redir`
 	if [ -n "$ssredir" ];then 
 		echo_date 关闭ss-redir进程...
@@ -194,6 +185,13 @@ kill_process(){
 		echo_date 关闭Hysteria2进程...
 		killall hysteria >/dev/null 2>&1
 		kill -9 "$hy2_process" >/dev/null 2>&1
+	fi
+
+	anytls_process=`pidof anytls`
+	if [ -n "$anytls_process" ];then
+		echo_date 关闭AnyTLS进程...
+		killall anytls >/dev/null 2>&1
+		kill -9 "$anytls_process" >/dev/null 2>&1
 	fi
 
 	rssredir=`pidof rss-redir`
@@ -508,8 +506,7 @@ start_sslocal(){
 			ss-local -l 23456 -c $CONFIG_FILE $ARG_V2RAY_PLUGIN -u -f /var/run/sslocal1.pid >/dev/null 2>&1
 		fi
 	elif [ "$ss_basic_type" == "4" ] && [ "$ss_basic_trojan_binary" == "Trojan-Go" ]; then
-		echo_date 开启trojan-go，提供socks5代理端口：23456 
-		trojan-go -config $TROJANGO2_CONFIG_FILE >/dev/null 2>&1 &	
+		echo_date Trojan-Go 使用 Xray 内置 socks5 入站端口：23456
 	elif [ "$ss_basic_type" == "5" ] ; then
 		echo_date 开启Naive Proxy，提供socks代理端口：23456 
 		naive $NAIVE2_CONFIG_FILE >/dev/null 2>&1 &		
@@ -1941,83 +1938,109 @@ create_trojan_json(){
 
 
 create_trojango_json(){
-	rm -rf "$TROJANGO_CONFIG_FILE"
-	rm -rf "$TROJANGO2_CONFIG_FILE"
+	rm -rf "$V2RAY_CONFIG_FILE_TMP"
+	rm -rf "$V2RAY_CONFIG_FILE"
 	if  [ "$ss_basic_type" == "4" ] && [ "$ss_basic_trojan_binary" == "Trojan-Go" ]; then
-		if [ "$ss_basic_trojan_network" == "1" ]; then
-		[ -n "$ss_basic_v2ray_network_path" ] && local ss_basic_v2ray_network_path=$(echo "/$ss_basic_v2ray_network_path" | sed 's,//,/,')
-			local ws="{ \"enabled\": true,
-						\"path\":  \"$ss_basic_v2ray_network_path\",
-						\"host\":  \"$ss_basic_v2ray_network_host\"
-						}"
-		else
-			local ws="{ \"enabled\": false,
-						\"path\":  \"\",
-						\"host\":  \"\"
-						}"
-		fi
 		[ -z "$(dbus get ss_basic_v2ray_mux_concurrency)" ] && local ss_basic_v2ray_mux_concurrency=8
-#		[ -z "$(dbus get ss_basic_trojan_sni)" ] && [ "$(dbus get ss_basic_server)" != "$ss_basic_v2ray_network_host" ] && local ss_basic_trojan_sni="$ss_basic_v2ray_network_host"
+		local trojan_sni="$ss_basic_trojan_sni"
+		[ -z "$trojan_sni" ] && [ -n "$ss_basic_v2ray_network_host" ] && trojan_sni="$ss_basic_v2ray_network_host"
 
-		echo_date 生成Trojan Go配置文件...
-		 #trojan go
-		generate_config() {
-			local run_type=$1
-			local local_addr=$2
-			local local_port=$3
-			local config_file=$4
+		if [ "$ss_basic_trojan_network" == "1" ]; then
+			[ -n "$ss_basic_v2ray_network_path" ] && local ss_basic_v2ray_network_path=$(echo "/$ss_basic_v2ray_network_path" | sed 's,//,/,')
+			local trojango_network="ws"
+			local ws_settings="{\"path\": \"$ss_basic_v2ray_network_path\", \"headers\": {\"Host\": \"$ss_basic_v2ray_network_host\"}}"
+		else
+			local trojango_network="tcp"
+			local ws_settings="null"
+		fi
 
-			cat >"$config_file" <<-EOF
+		echo_date 生成Trojan-Go Xray配置文件...
+		cat >"$V2RAY_CONFIG_FILE_TMP" <<-EOF
+		{
+			"log": {
+				"access": "/dev/null",
+				"error": "/tmp/v2ray_log.log",
+				"loglevel": "error"
+			},
+			"inbounds": [
 				{
-				"run_type": "$run_type",
-				"local_addr": "$local_addr",
-				"local_port": $local_port,
-				"remote_addr": "$(dbus get ss_basic_server)",
-				"remote_port": $ss_basic_port,
-				"log_level": 3,
-				"log_file": "/tmp/trojan-go_log.log",
-				"password": [
-					"$ss_basic_password"
-				],
-				"disable_http_check": false,
-				"udp_timeout": 60,
-				"ssl": {
-					"verify": true,
-					"verify_hostname": true,
-					"sni": "$ss_basic_trojan_sni",
-					"alpn": [
-					"http/1.1"
-					],
-					"session_ticket": true,
-					"reuse_session": true,
-					"fingerprint": $(get_fingerprint $ss_basic_fingerprint)
+					"tag": "in-socks",
+					"port": 23456,
+					"listen": "0.0.0.0",
+					"protocol": "socks",
+					"settings": {
+						"auth": "noauth",
+						"udp": true,
+						"ip": "127.0.0.1",
+						"clients": null
+					},
+					"streamSettings": null
 				},
-				"tcp": {
-					"no_delay": true,
-					"keep_alive": true,
-					"prefer_ipv4": true
-				},
-				"mux": {
-					"enabled": $(get_function_switch $ss_basic_v2ray_mux_enable),
-					"concurrency": $ss_basic_v2ray_mux_concurrency,
-					"idle_timeout": 60
-				},
-				"websocket": $ws,
-				"shadowsocks": {
-					"enabled": false,
-					"method": "AES-128-GCM",
-					"password": ""
+				{
+					"tag": "in-redir",
+					"listen": "0.0.0.0",
+					"port": 3333,
+					"protocol": "dokodemo-door",
+					"settings": {
+						"network": "tcp,udp",
+						"followRedirect": true
+					}
 				}
+			],
+			"outbounds": [
+				{
+					"tag": "agentout",
+					"protocol": "trojan-go",
+					"settings": {
+						"trojanGoMux": {
+							"enabled": $(get_function_switch $ss_basic_v2ray_mux_enable),
+							"concurrency": $ss_basic_v2ray_mux_concurrency,
+							"idle_timeout": 60
+						},
+						"servers": [
+							{
+								"address": "$(dbus get ss_basic_server)",
+								"port": $ss_basic_port,
+								"password": "$ss_basic_password"
+							}
+						]
+					},
+					"streamSettings": {
+						"network": "$trojango_network",
+						"security": "tls",
+						"tlsSettings": {
+							"allowInsecure": $(get_function_switch $ss_basic_allowinsecure),
+							"serverName": "$trojan_sni",
+							"alpn": ["http/1.1"],
+							"fingerprint": $(get_fingerprint $ss_basic_fingerprint)
+						},
+						"wsSettings": $ws_settings
+					},
+					"mux": {
+						"enabled": false,
+						"concurrency": 1
+					}
 				}
-			EOF
+			]
 		}
+		EOF
 
-		# 3333 for nat 
-		generate_config "nat" "0.0.0.0" 3333 "$TROJANGO_CONFIG_FILE"
-		# 23456 for socks5 
-		generate_config "client" "127.0.0.1" 23456 "$TROJANGO2_CONFIG_FILE"
-		
-		echo_date Trojan-Go配置文件写入成功到"$TROJANGO_CONFIG_FILE"
+		echo_date 写入Trojan-Go Xray配置文件...
+		mv -f "$V2RAY_CONFIG_FILE_TMP" "$V2RAY_CONFIG_FILE"
+		echo_date Trojan-Go Xray配置文件写入成功到"$V2RAY_CONFIG_FILE"
+
+		cd /koolshare/bin
+		echo_date 测试Trojan-Go Xray配置文件.....
+		result=$(xray -test -config="$V2RAY_CONFIG_FILE" | grep "Configuration OK.")
+		if [ -n "$result" ]; then
+			echo_date $result
+			echo_date Trojan-Go Xray配置文件通过测试!!!
+		else
+			echo_date Trojan-Go Xray配置文件没有通过测试，请检查设置!!!
+			rm -rf "$V2RAY_CONFIG_FILE_TMP"
+			rm -rf "$V2RAY_CONFIG_FILE"
+			close_in_five
+		fi
 	fi
 }
 
@@ -2125,65 +2148,43 @@ create_ss2022_json(){
 
 
 create_hy2_json(){
-	rm -f "$HY2_CONFIG_FILE"
+	rm -f "$HY2_CONFIG_FILE" 
 	if  [ "$ss_basic_type" == "4" ] && [ "$ss_basic_trojan_binary" == "Hysteria2" ]; then
+	
 		echo_date 生成Hysteria2配置文件...
+		 #HY2
 
-		local hy2_obfs_type="$ss_basic_hy2_obfs_type"
-		local hy2_obfs_password="$ss_basic_hy2_obfs_password"
-		local hy2_up_mbps="$ss_basic_hy2_up_mbps"
-		local hy2_down_mbps="$ss_basic_hy2_down_mbps"
-		local hy2_has_obfs="false"
-		local hy2_has_bandwidth="false"
-
-		[ "$hy2_obfs_type" == "salamander" ] && [ -n "$hy2_obfs_password" ] && hy2_has_obfs="true"
-		echo "$hy2_up_mbps" | grep -Eq '^[1-9][0-9]*$' && echo "$hy2_down_mbps" | grep -Eq '^[1-9][0-9]*$' && hy2_has_bandwidth="true"
-
-		jq -n \
-			--arg server "$(dbus get ss_basic_server):$ss_basic_port" \
-			--arg auth "$ss_basic_password" \
-			--arg sni "$ss_basic_trojan_sni" \
-			--argjson insecure "$(get_function_switch $ss_basic_allowinsecure)" \
-			--arg obfs_password "$hy2_obfs_password" \
-			--arg up "$hy2_up_mbps" \
-			--arg down "$hy2_down_mbps" \
-			--argjson has_obfs "$hy2_has_obfs" \
-			--argjson has_bandwidth "$hy2_has_bandwidth" '
+	cat >"$HY2_CONFIG_FILE" <<-EOF		
 			{
-				server: $server,
-				auth: $auth,
-				tls: {
-					sni: $sni,
-					insecure: $insecure
+				"server": "$(dbus get ss_basic_server):$ss_basic_port",
+				"auth": "${ss_basic_password}",
+				"tls": {
+					"sni": "$ss_basic_trojan_sni",
+					"insecure": $(get_function_switch $ss_basic_allowinsecure)
 				},
-				fastOpen: true,
-				lazy: true,
-				socks5: {
-					listen: "127.0.0.1:23456"
+				"fastOpen": true,
+				"lazy": true,
+				"socks5": {
+					"listen": "127.0.0.1:23456"
 				},
-				tcpRedirect: {
-					listen: "0.0.0.0:3333"
+				"tcpRedirect": {
+					"listen": "0.0.0.0:3333"
 				}
 			}
-			+ (if $has_obfs then {
-				obfs: {
-					type: "salamander",
-					salamander: {
-						password: $obfs_password
-					}
-				}
-			} else {} end)
-			+ (if $has_bandwidth then {
-				bandwidth: {
-					up: ($up + " mbps"),
-					down: ($down + " mbps")
-				}
-			} else {} end)
-			' > "$HY2_CONFIG_FILE"
+		EOF
 
-		if [ "$?" != "0" ] || [ ! -s "$HY2_CONFIG_FILE" ]; then
-			echo_date "Hysteria2 配置文件 JSON 生成失败！"
-			close_in_five
+		if [ -n "$ss_basic_hy2_global_json" ]; then
+			echo "$ss_basic_hy2_global_json" | base64_decode >"${HY2_GLOBAL_CONFIG_FILE}.tmp"
+			if jq -e 'type == "object" and length > 0 and (length == ([keys_unsorted[] | select(. == "obfs" or . == "congestion" or . == "bandwidth")] | length))' "${HY2_GLOBAL_CONFIG_FILE}.tmp" >/dev/null 2>&1; then
+				mv "${HY2_GLOBAL_CONFIG_FILE}.tmp" "$HY2_GLOBAL_CONFIG_FILE"
+				jq -s '.[0] * .[1]' "$HY2_CONFIG_FILE" "$HY2_GLOBAL_CONFIG_FILE" >"${HY2_CONFIG_FILE}.tmp" && mv "${HY2_CONFIG_FILE}.tmp" "$HY2_CONFIG_FILE"
+				echo_date Hysteria2 全局设定合并成功
+			else
+				echo_date Hysteria2 全局设定格式错误，已跳过
+			fi
+			rm -f "$HY2_GLOBAL_CONFIG_FILE" "${HY2_GLOBAL_CONFIG_FILE}.tmp" "${HY2_CONFIG_FILE}.tmp"
+		else
+			rm -f "$HY2_GLOBAL_CONFIG_FILE" "${HY2_GLOBAL_CONFIG_FILE}.tmp" "${HY2_CONFIG_FILE}.tmp"
 		fi
 
 		echo_date Hysteria2 配置文件写入成功到 "$HY2_CONFIG_FILE"
@@ -2239,22 +2240,23 @@ start_trojan() {
 }
 
 start_trojango() {
-	# trojango start
+	# trojan-go start by xray core
 	cd /koolshare/bin
-	trojan-go -config $TROJANGO_CONFIG_FILE >/dev/null 2>&1 &
+	xray run -config=$V2RAY_CONFIG_FILE >/dev/null 2>&1 &
 	local trojangoPID
 	local i=10
 	until [ -n "$trojangoPID" ]; do
 		i=$(($i - 1))
-		trojangoPID=`ps | grep -w trojan-go | grep -v "grep" | grep "$TROJANGO_CONFIG_FILE" | awk '{print $1}'`
+		trojangoPID=$(pidof xray)
 		if [ "$i" -lt 1 ]; then
-			echo_date "trojan-go进程启动失败！"
+			echo_date "Trojan-Go Xray进程启动失败！"
 			close_in_five
 		fi
 		sleep 1
 	done
-	echo_date trojan-go启动成功，pid：$trojangoPID
+	echo_date Trojan-Go Xray启动成功，pid：$trojangoPID
 }
+
 
 start_naiveproxy() {
 	# naiveproxy start
@@ -2291,6 +2293,29 @@ start_hy2() {
 		sleep 1
 	done
 	echo_date Hysteria2启动成功，pid：$hy2PID
+}
+
+start_anytls(){
+	# AnyTLS start
+	cd /koolshare/bin
+	if [ -n "$ss_basic_trojan_sni" ]; then
+		anytls -socks 127.0.0.1:23456 -nat 0.0.0.0:3333 -s "$(dbus get ss_basic_server):$ss_basic_port" -p "$ss_basic_password" -sni "$ss_basic_trojan_sni" >/dev/null 2>&1 &
+	else
+		anytls -socks 127.0.0.1:23456 -nat 0.0.0.0:3333 -s "$(dbus get ss_basic_server):$ss_basic_port" -p "$ss_basic_password" >/dev/null 2>&1 &
+	fi
+	local anytlsPID=$!
+	local i=10
+	until [ -n "$anytlsPID" ] && kill -0 "$anytlsPID" >/dev/null 2>&1; do
+		anytlsPID=$(pidof anytls)
+		[ -n "$anytlsPID" ] && break
+		i=$(($i - 1))
+		if [ "$i" -lt 1 ]; then
+			echo_date "AnyTLS进程启动失败！"
+			close_in_five
+		fi
+		sleep 1
+	done
+	echo_date AnyTLS启动成功，pid：$anytlsPID
 }
 
 start_ss2022() {
@@ -2399,6 +2424,7 @@ flush_nat(){
 	#iptables -t mangle -D PREROUTING -p udp -j SHADOWSOCKS >/dev/null 2>&1
 	
 	iptables -t mangle -F SHADOWSOCKS >/dev/null 2>&1 && iptables -t mangle -X SHADOWSOCKS >/dev/null 2>&1
+	iptables -t mangle -F SHADOWSOCKS_QUIC >/dev/null 2>&1 && iptables -t mangle -X SHADOWSOCKS_QUIC >/dev/null 2>&1
 	iptables -t mangle -F $(get_action_chain $ss_basic_mode) > /dev/null 2>&1 && iptables -t mangle -X $(get_action_chain $ss_basic_mode) > /dev/null 2>&1
 	iptables -t nat -D OUTPUT -p tcp -m set --match-set router dst -j REDIRECT --to-ports 3333 >/dev/null 2>&1
 	iptables -t nat -F OUTPUT > /dev/null 2>&1
@@ -2419,6 +2445,11 @@ flush_nat(){
 	done
 
 	iptables -t mangle -D QOSO0 -m mark --mark "$ip_prefix_hex" -j RETURN >/dev/null 2>&1
+	if command -v ip6tables >/dev/null 2>&1; then
+		while ip6tables -t filter -D FORWARD -j SHADOWSOCKS_IPV6 >/dev/null 2>&1; do :; done
+		ip6tables -t filter -F SHADOWSOCKS_IPV6 >/dev/null 2>&1
+		ip6tables -t filter -X SHADOWSOCKS_IPV6 >/dev/null 2>&1
+	fi
 	# flush ipset
 	ipset -F chnroute >/dev/null 2>&1 && ipset -X chnroute >/dev/null 2>&1
 	ipset -F white_list >/dev/null 2>&1 && ipset -X white_list >/dev/null 2>&1
@@ -2439,6 +2470,36 @@ flush_nat(){
 	#remove_route_table
 	#echo_date 删除ip route规则.
 	ip route del local 0.0.0.0/0 dev lo table 310 >/dev/null 2>&1
+}
+
+# 大陆白名单规则基于 IPv4 chnroute。启用 IPv6 时，客户端会绕过全部
+# IPv4 iptables 规则，因此在该模式下主动拒绝转发 IPv6，让客户端立即
+# 回退到可被透明代理接管的 IPv4。
+apply_ipv6_leak_guard(){
+	[ "$ss_basic_mode" == "2" ] || return 0
+	[ "$(nvram get ipv6_service)" != "disabled" ] || return 0
+	command -v ip6tables >/dev/null 2>&1 || return 0
+
+	ip6tables -t filter -N SHADOWSOCKS_IPV6 >/dev/null 2>&1
+	ip6tables -t filter -F SHADOWSOCKS_IPV6 >/dev/null 2>&1
+	ip6tables -t filter -A SHADOWSOCKS_IPV6 -j REJECT >/dev/null 2>&1
+	ip6tables -t filter -I FORWARD 1 -j SHADOWSOCKS_IPV6 >/dev/null 2>&1
+	echo_date 大陆白名单模式：已阻止客户端IPv6直连，避免绕过IPv4透明代理。
+}
+
+# 未启用 UDP 代理时，浏览器 QUIC/HTTP3 会通过 UDP/443 直连。仅丢弃
+# 非大陆地址的 QUIC 首包，浏览器随后会回退到受 nat 规则接管的 TCP。
+apply_quic_leak_guard(){
+	[ "$ss_basic_mode" == "2" ] || return 0
+	[ "$mangle" != "1" ] || return 0
+
+	iptables -t mangle -N SHADOWSOCKS_QUIC >/dev/null 2>&1
+	iptables -t mangle -F SHADOWSOCKS_QUIC >/dev/null 2>&1
+	iptables -t mangle -A SHADOWSOCKS_QUIC -m set --match-set white_list dst -j RETURN
+	iptables -t mangle -A SHADOWSOCKS_QUIC -m set --match-set black_list dst -j DROP
+	iptables -t mangle -A SHADOWSOCKS_QUIC -m set ! --match-set chnroute dst -j DROP
+	iptables -t mangle -A PREROUTING -p udp --dport 443 -j SHADOWSOCKS_QUIC
+	echo_date 大陆白名单模式：UDP代理未开启，已阻止境外QUIC直连并强制浏览器回退TCP。
 }
 
 # create ipset rules
@@ -2679,14 +2740,26 @@ apply_nat_rules(){
 	# 如果是主模式游戏模式，则把SHADOWSOCKS链中剩余udp流量转发给SHADOWSOCKS_GAM链
 	# 如果主模式不是游戏模式，则不需要把SHADOWSOCKS链中剩余udp流量转发给SHADOWSOCKS_GAM，不然会造成其他模式主机的udp也走游戏模式
 	###[ "$mangle" == "1" ] && ss_acl_default_mode=3
-	[ "$ss_acl_default_mode" != "0" ] && [ "$ss_acl_default_mode" != "3" ] && [ "$ss_basic_udp_sync" != "1" ]  && ss_acl_default_mode=0
-	[ "$ss_basic_mode" == "3" ] || [ "$ss_basic_udp_sync" == "1" ]  && iptables -t mangle -A SHADOWSOCKS -p udp -j $(get_action_chain $ss_acl_default_mode)
+	[ "$ss_acl_default_mode" != "0" ] && [ "$ss_acl_default_mode" != "3" ] && [ "$ss_basic_udp_sync" != "1" ] && [ "$ss_basic_udp_sync" != "2" ]  && ss_acl_default_mode=0
+	[ "$ss_basic_mode" == "3" ] || [ "$ss_basic_udp_sync" == "1" ] || [ "$ss_basic_udp_sync" == "2" ]  && iptables -t mangle -A SHADOWSOCKS -p udp -j $(get_action_chain $ss_acl_default_mode)
 	# 重定所有流量到 SHADOWSOCKS
 	KP_NU=`iptables -nvL PREROUTING -t nat |sed 1,2d | sed -n '/KOOLPROXY/='|head -n1`
 	[ "$KP_NU" == "" ] && KP_NU=0
 	INSET_NU=`expr "$KP_NU" + 1`
 	iptables -t nat -I PREROUTING "$INSET_NU" -p tcp -j SHADOWSOCKS
-	[ "$mangle" == "1" ] && iptables -t mangle -A PREROUTING -p udp -j SHADOWSOCKS
+	if [ "$mangle" == "1" ]; then
+		# 仅QUIC模式(ss_basic_udp_sync=2)且无游戏需求时，只把QUIC(UDP/443)导入透明代理链，
+		# 其余UDP一律直连，避免BT/视频/游戏等大流量UDP涌入TPROXY拖垮路由器CPU。
+		# 存在游戏模式主机(game_on)或主模式为游戏模式时，游戏需要全量UDP，自动回退到全量代理。
+		if [ "$ss_basic_udp_sync" == "2" ] && [ -z "$game_on" ] && [ "$ss_basic_mode" != "3" ]; then
+			iptables -t mangle -A PREROUTING -p udp --dport 443 -j SHADOWSOCKS
+			echo_date 仅代理QUIC模式：只将境外QUIC（UDP/443）导入透明代理，其余UDP直连以降低路由器负载。
+		else
+			iptables -t mangle -A PREROUTING -p udp -j SHADOWSOCKS
+		fi
+	fi
+	apply_quic_leak_guard
+	apply_ipv6_leak_guard
 	# QOS开启的情况下
 	QOSO=`iptables -t mangle -S | grep -o QOSO | wc -l`
 	RRULE=`iptables -t mangle -S | grep "A QOSO" | head -n1 | grep RETURN`
@@ -3024,6 +3097,7 @@ apply_ss(){
 	[ "$ss_basic_type" == "4" -a "$ss_basic_trojan_binary" == "Trojan-Go" ] && start_trojango
 	[ "$ss_basic_type" == "5" ] && start_naiveproxy
 	[ "$ss_basic_type" == "4" -a "$ss_basic_trojan_binary" == "Hysteria2" ] && start_hy2
+	[ "$ss_basic_type" == "4" -a "$ss_basic_trojan_binary" == "AnyTLS" ] && start_anytls
 	[ "$ss_basic_type" != "2" ] && start_kcp
 	[ "$ss_basic_type" != "2" ] && start_dns
 	#===load nat start===
