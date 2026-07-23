@@ -22,6 +22,9 @@ get_mode_name() {
 		5)
 			echo "【全局模式】"
 		;;
+		6)
+			echo "【回国模式】"
+		;;
 	esac
 }
 
@@ -315,14 +318,32 @@ check_status(){
 	iptables -nvL SHADOWSOCKS_HOM -t nat
 	echo -----------------------------------------------------------------------------------------------------------------------------------
 	echo
-	[ -n "$game_on" ] || [ "$ss_basic_mode" == "3" ] || [ "$ss_basic_udp_sync" == "1" ] && echo ------------------------------------------------------ mangle表 PREROUTING 链 -------------------------------------------------------
-	[ -n "$game_on" ] || [ "$ss_basic_mode" == "3" ] || [ "$ss_basic_udp_sync" == "1" ] && iptables -nvL PREROUTING -t mangle
-	[ -n "$game_on" ] || [ "$ss_basic_mode" == "3" ] || [ "$ss_basic_udp_sync" == "1" ] && echo
-	[ -n "$game_on" ] || [ "$ss_basic_mode" == "3" ] || [ "$ss_basic_udp_sync" == "1" ] && echo ------------------------------------------------------ mangle表 SHADOWSOCKS 链 -------------------------------------------------------
-	[ -n "$game_on" ] || [ "$ss_basic_mode" == "3" ] || [ "$ss_basic_udp_sync" == "1" ] && iptables -nvL SHADOWSOCKS -t mangle
-	[ -n "$game_on" ] || [ "$ss_basic_mode" == "3" ] || [ "$ss_basic_udp_sync" == "1" ] && echo
-	[ -n "$game_on" ] || [ "$ss_basic_mode" == "3" ] || [ "$ss_basic_udp_sync" == "1" ] && echo ------------------------------------------------------ mangle表 $(get_action_chain $ss_basic_mode) 链 -------------------------------------------------------
-	[ -n "$game_on" ] || [ "$ss_basic_mode" == "3" ] || [ "$ss_basic_udp_sync" == "1" ] && iptables -nvL $(get_action_chain $ss_basic_mode) -t mangle
+	MANGLE_SHOW=""
+	{ [ -n "$game_on" ] || [ "$ss_basic_mode" == "3" ] || [ "$ss_basic_udp_sync" == "1" ] || [ "$ss_basic_udp_sync" == "2" ]; } && MANGLE_SHOW=1
+	if [ -n "$MANGLE_SHOW" ]; then
+		echo ------------------------------------------------------ mangle表 PREROUTING 链 -------------------------------------------------------
+		iptables -nvL PREROUTING -t mangle
+		echo
+		echo ------------------------------------------------------ mangle表 SHADOWSOCKS 链 -------------------------------------------------------
+		iptables -nvL SHADOWSOCKS -t mangle
+		echo
+		for MCHAIN in SHADOWSOCKS_GFW SHADOWSOCKS_CHN SHADOWSOCKS_GAM SHADOWSOCKS_GLO SHADOWSOCKS_HOM; do
+			echo ------------------------------------------------------ mangle表 $MCHAIN 链 -------------------------------------------------------
+			iptables -nvL $MCHAIN -t mangle
+			echo
+		done
+	fi
+	# filter层境外流量兜底guard（大陆白名单模式）
+	if [ "$ss_basic_mode" == "2" ]; then
+		echo ------------------------------------------------------ filter表 SHADOWSOCKS_FWD 链（境外TCP/UDP兜底） -------------------------------------------------------
+		iptables -nvL SHADOWSOCKS_FWD -t filter
+		echo
+		if command -v ip6tables >/dev/null 2>&1; then
+			echo ------------------------------------------------------ filter表 SHADOWSOCKS_IPV6 链 -------------------------------------------------------
+			ip6tables -nvL SHADOWSOCKS_IPV6 -t filter
+			echo
+		fi
+	fi
 	echo -----------------------------------------------------------------------------------------------------------------------------------
 	echo
 }

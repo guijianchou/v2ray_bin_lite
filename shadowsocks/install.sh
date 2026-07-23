@@ -36,7 +36,7 @@ fi
 
 if [ -n "`ls /koolshare/ss/postscripts/P*.sh 2>/dev/null`" ];then
 	echo_date 备份触发脚本!
-	find /koolshare/ss/postscripts -name "P*.sh" | xargs -i mv {} -f /tmp/ss_backup
+	find /koolshare/ss/postscripts -name "P*.sh" -exec mv -f {} /tmp/ss_backup \;
 fi
 
 # 如果dnsmasq是mounted状态，先恢复
@@ -66,7 +66,7 @@ rm -rf /koolshare/res/shadowsocks.css
 rm -rf /koolshare/res/gameV2.png
 rm -rf /koolshare/res/ss_proc_status.htm
 rm -rf /koolshare/init.d/S89Socks5.sh
-find /koolshare/init.d/ -name "*socks5.sh" | xargs rm -rf
+find /koolshare/init.d/ -name "*socks5.sh" -exec rm -rf {} \;
 
 echo_date 开始复制文件！
 cd /tmp

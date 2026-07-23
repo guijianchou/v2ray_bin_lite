@@ -60,6 +60,27 @@ fi
 	fi
 }
 
+# UDP透明入站能力校验："同步UDP与TCP"三档(0关闭/2仅QUIC/1全量)与游戏模式共用此判定，
+# 档位即开关，无额外门禁。支持透明UDP的核心：
+# - ss-redir系(type 0/1/2: ss-redir/rss-redir/koolgame)：ss-redir原生 -U + mangle TPROXY→3333；
+# - Xray系(type 3: v2ray/xray/ss2022, type 4: Trojan/Trojan-Go)：dokodemo拆分入站
+#   in-redir(tcp,redirect)+in-tproxy(udp,tproxy带sockopt.tproxy)，见xray_in_redir/xray_in_tproxy，
+#   祖传"单inbound tcp,udp缺sockopt.tproxy导致UDP黑洞"已从结构上消除。
+# naive/hysteria2/anytls没有透明UDP监听器，自动降级纯TCP，境外QUIC由filter guard拦截促TCP回退（其余境外UDP直连）。
+# 失败路径均fail-safe：内核无TPROXY/fwmark冲突由load_tproxy探测后降级mangle，guard兜底，不泄漏不黑洞。
+udp_tproxy_supported="0"
+case "$ss_basic_type" in
+	0|1|2|3) udp_tproxy_supported="1" ;;
+	4) case "$ss_basic_trojan_binary" in Trojan|Trojan-Go) udp_tproxy_supported="1" ;; esac ;;
+esac
+if [ "$udp_tproxy_supported" != "1" ]; then
+	if [ "$ss_basic_udp_sync" == "1" ] || [ "$ss_basic_udp_sync" == "2" ] || [ -n "$game_on" ] || [ "$ss_basic_mode" == "3" ]; then
+		echo_date "当前节点核心(naive/hysteria2/anytls等)无透明UDP入站能力，UDP同步/游戏UDP无法透明代理，已降级纯TCP（境外QUIC由filter层拦截促TCP回退，其余境外UDP直连）。"
+	fi
+	ss_basic_udp_sync="0"
+	mangle=""
+fi
+
 get_lan_cidr(){
 	netmask=`nvram get lan_netmask`
 	local x=${netmask##*255.}
@@ -1381,6 +1402,16 @@ EOF
 }
 
 
+# Xray透明入站构造器：把祖传的单个 dokodemo(tcp,udp) 拆成 in-redir(tcp,redirect)+
+# in-tproxy(udp,tproxy)。缺 sockopt.tproxy="tproxy" 正是UDP被TPROXY送进3333却黑洞的根因。
+# 输出紧凑单行合法JSON，便于嵌入普通heredoc与转义的custom TEMPLATE字符串。
+xray_in_redir(){
+	printf '%s' '{"tag":"in-redir","listen":"0.0.0.0","port":3333,"protocol":"dokodemo-door","settings":{"network":"tcp","followRedirect":true},"streamSettings":{"sockopt":{"tproxy":"redirect"}}}'
+}
+xray_in_tproxy(){
+	printf '%s' '{"tag":"in-tproxy","listen":"0.0.0.0","port":3333,"protocol":"dokodemo-door","settings":{"network":"udp","followRedirect":true},"streamSettings":{"sockopt":{"tproxy":"tproxy"}}}'
+}
+
 create_v2ray_json(){
 	rm -rf "$V2RAY_CONFIG_FILE_TMP"
 	rm -rf "$V2RAY_CONFIG_FILE"
@@ -1540,16 +1571,7 @@ create_v2ray_json(){
 						"followRedirect": false
 						}
 					},
-					{
-						"tag": "in-redir",
-						"listen": "0.0.0.0",
-						"port": 3333,
-						"protocol": "dokodemo-door",
-						"settings": {
-							"network": "tcp,udp",
-							"followRedirect": true
-						}
-					}
+					$(xray_in_redir)$( [ -n "$mangle" ] && printf ',%s' "$(xray_in_tproxy)" )
 				],
 			EOF
 		else
@@ -1569,16 +1591,7 @@ create_v2ray_json(){
 						},
 						"streamSettings": null
 					},
-					{
-						"tag": "in-redir",
-						"listen": "0.0.0.0",
-						"port": 3333,
-						"protocol": "dokodemo-door",
-						"settings": {
-							"network": "tcp,udp",
-							"followRedirect": true
-						}
-					}
+					$(xray_in_redir)$( [ -n "$mangle" ] && printf ',%s' "$(xray_in_tproxy)" )
 				],
 			EOF
 		fi
@@ -1706,16 +1719,7 @@ create_v2ray_json(){
 											\"followRedirect\": false
 										}
 									},
-									{
-										\"tag\": \"in-redir\",
-										\"listen\": \"0.0.0.0\",
-										\"port\": 3333,
-										\"protocol\": \"dokodemo-door\",
-										\"settings\": {
-											\"network\": \"tcp,udp\",
-											\"followRedirect\": true
-										}
-									}
+									$(xray_in_redir)$( [ -n "$mangle" ] && printf ',%s' "$(xray_in_tproxy)" )
 								]
 							}"
 		else
@@ -1739,16 +1743,7 @@ create_v2ray_json(){
 										},
 										\"streamSettings\": null
 									},
-									{
-										\"tag\": \"in-redir\",
-										\"listen\": \"0.0.0.0\",
-										\"port\": 3333,
-										\"protocol\": \"dokodemo-door\",
-										\"settings\": {
-											\"network\": \"tcp,udp\",
-											\"followRedirect\": true
-										}
-									}
+									$(xray_in_redir)$( [ -n "$mangle" ] && printf ',%s' "$(xray_in_tproxy)" )
 								]
 							}"
 		fi
@@ -1805,7 +1800,7 @@ create_v2ray_json(){
 					"rules": [
 						{
 							"type": "field",
-							"inboundTag": ["in-socks","in-redir"],
+							"inboundTag": ["in-socks","in-redir","in-tproxy"],
 							"balancerTag": "balancer-main"
 						}
 					]
@@ -1881,15 +1876,7 @@ create_trojan_json(){
 						},
 						"streamSettings": null
 					},
-					{
-						"listen": "0.0.0.0",
-						"port": 3333,
-						"protocol": "dokodemo-door",
-						"settings": {
-							"network": "tcp,udp",
-							"followRedirect": true
-						}
-					}
+					$(xray_in_redir)$( [ -n "$mangle" ] && printf ',%s' "$(xray_in_tproxy)" )
 				],
 			"outbounds": [
 			  {
@@ -1976,16 +1963,7 @@ create_trojango_json(){
 					},
 					"streamSettings": null
 				},
-				{
-					"tag": "in-redir",
-					"listen": "0.0.0.0",
-					"port": 3333,
-					"protocol": "dokodemo-door",
-					"settings": {
-						"network": "tcp,udp",
-						"followRedirect": true
-					}
-				}
+				$(xray_in_redir)$( [ -n "$mangle" ] && printf ',%s' "$(xray_in_tproxy)" )
 			],
 			"outbounds": [
 				{
@@ -2098,15 +2076,7 @@ create_ss2022_json(){
 						},
 						"streamSettings": null
 					},
-					{
-						"listen": "0.0.0.0",
-						"port": 3333,
-						"protocol": "dokodemo-door",
-						"settings": {
-							"network": "tcp,udp",
-							"followRedirect": true
-						}
-					}
+					$(xray_in_redir)$( [ -n "$mangle" ] && printf ',%s' "$(xray_in_tproxy)" )
 				],
 			"outbounds": [
 			  {
@@ -2345,15 +2315,14 @@ write_cron_job(){
 	else
 		echo_date shadowsocks规则定时更新任务未启用！
 	fi
+	# 节点订阅入口已从 Web UI 移除：无条件清理订阅定时任务，并清零残留的废弃 DBus 开关，
+	# 防止历史配置（ss_basic_node_update=1）让订阅在后台继续定时运行。
 	sed -i '/ssnodeupdate/d' /var/spool/cron/crontabs/* >/dev/null 2>&1
 	if [ "$ss_basic_node_update" = "1" ];then
-		if [ "$ss_basic_node_update_day" = "7" ];then
-			cru a ssnodeupdate "2 $ss_basic_node_update_hr * * * /koolshare/scripts/ss_online_update.sh 3"
-			echo_date "设置自动更新节点订阅在每天 $ss_basic_node_update_hr 点。"
-		else
-			cru a ssnodeupdate "2 $ss_basic_node_update_hr * * $ss_basic_node_update_day /koolshare/scripts/ss_online_update.sh 3"
-			echo_date "设置自动更新节点订阅在星期 $ss_basic_node_update_day 的 $ss_basic_node_update_hr 点。"
-		fi
+		echo_date "检测到已废弃的节点订阅自动更新开关，已清除（订阅功能入口已移除）。"
+		dbus remove ss_basic_node_update >/dev/null 2>&1
+		dbus remove ss_basic_node_update_day >/dev/null 2>&1
+		dbus remove ss_basic_node_update_hr >/dev/null 2>&1
 	fi
 }
 
@@ -2371,30 +2340,28 @@ kill_cron_job(){
 load_tproxy(){
 	MODULES="nf_tproxy_core xt_TPROXY xt_socket xt_comment"
 	OS=$(uname -r)
-	# load Kernel Modules
 	echo_date 加载TPROXY模块，用于udp转发...
-	checkmoduleisloaded(){
-		if lsmod | grep $MODULE &> /dev/null; then return 0; else return 1; fi;
-	}
-	
+	# best-effort加载：内核内建(built-in)模块不出现在lsmod属正常，不据此判失败。
+	# (修复原版计数bug：j未定义、-ne 3却有4个模块、内建模块被误判缺失而close_in_five硬中止启动)
 	for MODULE in $MODULES; do
-		if ! checkmoduleisloaded; then
-			insmod /lib/modules/${OS}/kernel/net/netfilter/${MODULE}.ko
+		if ! lsmod | grep -q "$MODULE"; then
+			insmod /lib/modules/${OS}/kernel/net/netfilter/${MODULE}.ko >/dev/null 2>&1
 		fi
 	done
-	
-	modules_loaded=0
-	
-	for MODULE in $MODULES; do
-		if checkmoduleisloaded; then
-			modules_loaded=$(( j++ )); 
-		fi
-	done
-	
-	if [ $modules_loaded -ne 3 ]; then
-		echo "One or more modules are missing, only $(( modules_loaded+1 )) are loaded. Can't start.";
-		close_in_five
+	# 权威探测：用未挂接的临时链实测内核/xtables是否真正接受TPROXY target。
+	# 比"数lsmod"可靠——内建模块、老内核命名差异都不会误判；探测后立即删除，不承载业务流量。
+	iptables -t mangle -F SS_TPROXY_TEST >/dev/null 2>&1
+	iptables -t mangle -X SS_TPROXY_TEST >/dev/null 2>&1
+	iptables -t mangle -N SS_TPROXY_TEST >/dev/null 2>&1
+	if iptables -t mangle -A SS_TPROXY_TEST -p udp -j TPROXY --on-port 3333 --tproxy-mark 0x07 >/dev/null 2>&1; then
+		iptables -t mangle -F SS_TPROXY_TEST >/dev/null 2>&1
+		iptables -t mangle -X SS_TPROXY_TEST >/dev/null 2>&1
+		return 0
 	fi
+	iptables -t mangle -F SS_TPROXY_TEST >/dev/null 2>&1
+	iptables -t mangle -X SS_TPROXY_TEST >/dev/null 2>&1
+	echo_date "内核不接受TPROXY target(缺xt_TPROXY或老内核不支持)，UDP透明代理不可用，降级为TCP-only。"
+	return 1
 }
 
 
@@ -2424,10 +2391,16 @@ flush_nat(){
 	#iptables -t mangle -D PREROUTING -p udp -j SHADOWSOCKS >/dev/null 2>&1
 	
 	iptables -t mangle -F SHADOWSOCKS >/dev/null 2>&1 && iptables -t mangle -X SHADOWSOCKS >/dev/null 2>&1
+	iptables -t mangle -F SS_TPROXY_TEST >/dev/null 2>&1 && iptables -t mangle -X SS_TPROXY_TEST >/dev/null 2>&1
 	iptables -t mangle -F SHADOWSOCKS_QUIC >/dev/null 2>&1 && iptables -t mangle -X SHADOWSOCKS_QUIC >/dev/null 2>&1
-	iptables -t mangle -F $(get_action_chain $ss_basic_mode) > /dev/null 2>&1 && iptables -t mangle -X $(get_action_chain $ss_basic_mode) > /dev/null 2>&1
+	# 清理全部 mangle 模式 action 链（apply_nat_rules 现在预建全部 5 个）
+	for MCHAIN in SHADOWSOCKS_GFW SHADOWSOCKS_CHN SHADOWSOCKS_GAM SHADOWSOCKS_GLO SHADOWSOCKS_HOM; do
+		iptables -t mangle -F $MCHAIN >/dev/null 2>&1 && iptables -t mangle -X $MCHAIN >/dev/null 2>&1
+	done
+	# 精确删除本插件的 nat/OUTPUT 规则，不再整表 flush OUTPUT（避免误删其他插件/用户的 OUTPUT 规则）
 	iptables -t nat -D OUTPUT -p tcp -m set --match-set router dst -j REDIRECT --to-ports 3333 >/dev/null 2>&1
-	iptables -t nat -F OUTPUT > /dev/null 2>&1
+	iptables -t nat -D OUTPUT -p tcp -m mark --mark "$ip_prefix_hex" -j SHADOWSOCKS_EXT >/dev/null 2>&1
+	iptables -t nat -F SHADOWSOCKS_EXT > /dev/null 2>&1
 	iptables -t nat -X SHADOWSOCKS_EXT > /dev/null 2>&1
 	#iptables -t nat -D PREROUTING -p udp -s $(get_lan_cidr) --dport 53 -j DNAT --to $lan_ipaddr >/dev/null 2>&1
 	# 清理DNS劫持规则和链
@@ -2445,6 +2418,12 @@ flush_nat(){
 	done
 
 	iptables -t mangle -D QOSO0 -m mark --mark "$ip_prefix_hex" -j RETURN >/dev/null 2>&1
+	# 清理 filter/FORWARD 的境外流量兜底 guard（IPv4）
+	while iptables -t filter -D FORWARD -i br+ -j SHADOWSOCKS_FWD >/dev/null 2>&1; do :; done
+	iptables -t filter -F SHADOWSOCKS_FWD >/dev/null 2>&1
+	iptables -t filter -X SHADOWSOCKS_FWD >/dev/null 2>&1
+	# 清理 DNS 强制(all)：FORWARD 的 DoT/DoH 拦截链 + PREROUTING 的 53 改道 + ss_doh 集
+	clean_dns_force
 	if command -v ip6tables >/dev/null 2>&1; then
 		while ip6tables -t filter -D FORWARD -j SHADOWSOCKS_IPV6 >/dev/null 2>&1; do :; done
 		ip6tables -t filter -F SHADOWSOCKS_IPV6 >/dev/null 2>&1
@@ -2473,8 +2452,8 @@ flush_nat(){
 }
 
 # 大陆白名单规则基于 IPv4 chnroute。启用 IPv6 时，客户端会绕过全部
-# IPv4 iptables 规则，因此在该模式下主动拒绝转发 IPv6，让客户端立即
-# 回退到可被透明代理接管的 IPv4。
+# IPv4 iptables 规则，因此在该模式下拒绝把 IPv6 转发到外网，让客户端
+# 立即回退到可被透明代理接管的 IPv4；同时保留 LAN 网段之间的 IPv6 互访。
 apply_ipv6_leak_guard(){
 	[ "$ss_basic_mode" == "2" ] || return 0
 	[ "$(nvram get ipv6_service)" != "disabled" ] || return 0
@@ -2482,24 +2461,136 @@ apply_ipv6_leak_guard(){
 
 	ip6tables -t filter -N SHADOWSOCKS_IPV6 >/dev/null 2>&1
 	ip6tables -t filter -F SHADOWSOCKS_IPV6 >/dev/null 2>&1
-	ip6tables -t filter -A SHADOWSOCKS_IPV6 -j REJECT >/dev/null 2>&1
+	# 出接口是 LAN 桥的 IPv6（内网互访）放行，只拦经路由器转发到外部的 IPv6
+	ip6tables -t filter -A SHADOWSOCKS_IPV6 -o br+ -j RETURN >/dev/null 2>&1
+	ip6tables -t filter -A SHADOWSOCKS_IPV6 -j REJECT --reject-with icmp6-adm-prohibited >/dev/null 2>&1 || \
+		ip6tables -t filter -A SHADOWSOCKS_IPV6 -j DROP >/dev/null 2>&1
 	ip6tables -t filter -I FORWARD 1 -j SHADOWSOCKS_IPV6 >/dev/null 2>&1
-	echo_date 大陆白名单模式：已阻止客户端IPv6直连，避免绕过IPv4透明代理。
+	echo_date 大陆白名单模式：已阻止客户端IPv6直连外网\(保留内网IPv6\)，避免绕过IPv4透明代理。
 }
 
-# 未启用 UDP 代理时，浏览器 QUIC/HTTP3 会通过 UDP/443 直连。仅丢弃
-# 非大陆地址的 QUIC 首包，浏览器随后会回退到受 nat 规则接管的 TCP。
-apply_quic_leak_guard(){
+# 大陆白名单模式下，NAT 透明代理只接管 TCP；QUIC(UDP/443) 与其余境外 UDP 会绕过 NAT
+# REDIRECT。在 filter/FORWARD 建一道兜底 guard：漏过本地接管的境外 TCP 与境外 QUIC 拦下，
+# 不依赖"浏览器丢弃 QUIC 后必然回退到受 NAT 接管的 TCP"这一假定。
+#   - TCP 用 REJECT tcp-reset：漏过 NAT REDIRECT 的境外直连被立即 reset，而非裸奔；
+#   - QUIC(UDP/443) 用 REJECT icmp-port-unreachable：让浏览器立即回退 TCP（比静默 DROP 快得多）；
+#   - 非 443 的境外 UDP（游戏、语音、NTP 等）不拦截，保持直连——这类流量没有 TCP 回退路径，
+#     拦了只会掐断游戏；需要强制走代理的目标请加黑名单（black_list 的 UDP 全端口仍拦截兜底）。
+#   - REJECT 目标不可用时回退 DROP。
+# 与 UDP 同步三档配合：关闭/仅QUIC 档未被 TPROXY 接管的境外 QUIC 由此拦截促回退，其余 UDP 直连；
+# 全量档境外 UDP 均被 TPROXY，此处只兜底漏网的 QUIC。
+apply_forward_guard(){
 	[ "$ss_basic_mode" == "2" ] || return 0
-	[ "$mangle" != "1" ] || return 0
+	# 安全护栏：chnroute 集为空/未就绪时（如规则下载失败），大陆 IP 会被误判为境外而
+	# 被本 guard 全部 REJECT 导致整网断。判断集合是否确有 IP 成员，异常则跳过 guard
+	# （宁可暂时不拦境外，也不能误杀大陆流量断网）。
+	if ! ipset list chnroute 2>/dev/null | grep -qE '^[0-9]'; then
+		echo_date 警告：chnroute集未就绪，跳过filter层境外兜底guard以防误伤大陆流量导致断网。
+		return 0
+	fi
 
-	iptables -t mangle -N SHADOWSOCKS_QUIC >/dev/null 2>&1
-	iptables -t mangle -F SHADOWSOCKS_QUIC >/dev/null 2>&1
-	iptables -t mangle -A SHADOWSOCKS_QUIC -m set --match-set white_list dst -j RETURN
-	iptables -t mangle -A SHADOWSOCKS_QUIC -m set --match-set black_list dst -j DROP
-	iptables -t mangle -A SHADOWSOCKS_QUIC -m set ! --match-set chnroute dst -j DROP
-	iptables -t mangle -A PREROUTING -p udp --dport 443 -j SHADOWSOCKS_QUIC
-	echo_date 大陆白名单模式：UDP代理未开启，已阻止境外QUIC直连并强制浏览器回退TCP。
+	iptables -t filter -N SHADOWSOCKS_FWD >/dev/null 2>&1
+	iptables -t filter -F SHADOWSOCKS_FWD >/dev/null 2>&1
+	# DNS(UDP/53) 交给既有 DNS 劫持逻辑，guard 不干预，避免改变现有 DNS 行为
+	iptables -t filter -A SHADOWSOCKS_FWD -p udp --dport 53 -j RETURN >/dev/null 2>&1
+	# 白名单与大陆 IP：正常直连转发。白名单优先于黑名单，与 nat/mangle 链的 white-first
+	# 语义一致——同一 IP 同时命中黑白名单时，nat 已放行直连，guard 若再拦会掐断该连接。
+	iptables -t filter -A SHADOWSOCKS_FWD -m set --match-set white_list dst -j RETURN >/dev/null 2>&1
+	iptables -t filter -A SHADOWSOCKS_FWD -m set --match-set chnroute dst -j RETURN >/dev/null 2>&1
+	# 强制走代理的黑名单目标若漏过本地接管，优先于境外兜底直接拦截
+	iptables -t filter -A SHADOWSOCKS_FWD -m set --match-set black_list dst -p tcp -j REJECT --reject-with tcp-reset >/dev/null 2>&1 || \
+		iptables -t filter -A SHADOWSOCKS_FWD -m set --match-set black_list dst -p tcp -j DROP >/dev/null 2>&1
+	iptables -t filter -A SHADOWSOCKS_FWD -m set --match-set black_list dst -p udp -j REJECT --reject-with icmp-port-unreachable >/dev/null 2>&1 || \
+		iptables -t filter -A SHADOWSOCKS_FWD -m set --match-set black_list dst -p udp -j DROP >/dev/null 2>&1
+	# 其余=境外：TCP 漏网兜底 reset；QUIC(UDP/443) 拦截促 TCP 回退。
+	# 非 443 境外 UDP（游戏等）不拦截，落到链尾 RETURN 直连——游戏 UDP 无 TCP 回退路径，拦截即断游戏。
+	iptables -t filter -A SHADOWSOCKS_FWD -p tcp -j REJECT --reject-with tcp-reset >/dev/null 2>&1 || \
+		iptables -t filter -A SHADOWSOCKS_FWD -p tcp -j DROP >/dev/null 2>&1
+	iptables -t filter -A SHADOWSOCKS_FWD -p udp --dport 443 -j REJECT --reject-with icmp-port-unreachable >/dev/null 2>&1 || \
+		iptables -t filter -A SHADOWSOCKS_FWD -p udp --dport 443 -j DROP >/dev/null 2>&1
+	iptables -t filter -A SHADOWSOCKS_FWD -j RETURN >/dev/null 2>&1
+	iptables -t filter -I FORWARD 1 -i br+ -j SHADOWSOCKS_FWD >/dev/null 2>&1
+	echo_date 大陆白名单模式：已启用filter层境外兜底\(TCP reset / QUIC即时回退，非443境外UDP如游戏保持直连\)。
+}
+
+# DNS 强制（“DNS劫持=all/2”档）：白名单域名靠"客户端经路由器 dnsmasq 解析→ipset=/域名/white_list
+# 把该 IP 写入 white_list"才生效。若客户端用 DoH/DoT 或指向公共 DNS，查询绕过 dnsmasq，
+# 白名单域名的真实连接 IP 永远不进 white_list，就被 CHN !chnroute 兜底代理——这正是
+# "加了白名单域名仍走代理/CF 盾显示代理出口 IP"的根因（CDN/anycast 站尤其明显）。
+# 对策：强制 LAN 客户端 DNS 走本机 dnsmasq。
+#   1) 明文 DNS(UDP+TCP/53) 改道到本机 dnsmasq（原版仅劫持 UDP/53，这里补 TCP/53）；
+#   2) 拦 DoT(853) 与已知 DoH 解析器 IP 的 443(TCP/QUIC)，逼客户端回退明文 DNS→被改道。
+# 出错回退：改道前校验本机 dnsmasq 在跑，否则返回 1，由 chromecast 回退到 default(仅UDP/53劫持)，
+# 避免把全网 DNS 改道到不存在的监听导致断网。只作用于转发的客户端流量(FORWARD/PREROUTING -i br+)，
+# 不影响路由器自身上游 DNS(走 OUTPUT)。返回 0=已接管，返回 1=前置校验失败需回退 default。
+apply_dns_force(){
+	[ "$ss_basic_dns_hijack" == "2" ] || return 1
+
+	# 前置校验（回退依据）：本机 dnsmasq 必须在运行，否则强制改道 = 全网 DNS 中断。
+	if ! pidof dnsmasq >/dev/null 2>&1; then
+		echo_date "DNS劫持(all)：本机 dnsmasq 未运行，强制改道会导致DNS中断，自动回退默认劫持(default)。"
+		return 1
+	fi
+	# TCP/53 能力探测（软降级，不触发整体回退）：本机无 TCP/53 监听则跳过 TCP 改道，
+	# 避免把 TCP DNS 改道到不应答的端口。UDP 强制 + DoT/DoH 仍生效。
+	local tcp53_ok=0
+	netstat -tnl 2>/dev/null | grep -qE "[:.]53[^0-9]" && tcp53_ok=1
+
+	# 明文 DNS 改道：-I PREROUTING 1 确保先于 nat SHADOWSOCKS 链，否则 TCP/53 发往境外
+	# 解析器会命中 !chnroute 被 REDIRECT 进代理。目的为本机的 53 不改道，避免环路。
+	local br dst applied=0
+	for br in $(ifconfig | grep -E "^br" | awk '{print $1}'); do
+		dst=$(ifconfig "$br" | grep "inet addr" | awk '{print $2}' | awk -F: '{print $2}')
+		[ -n "$dst" ] || continue
+		iptables -t nat -I PREROUTING 1 -i "$br" -p udp --dport 53 ! -d "$dst" -j DNAT --to-destination "$dst":53 >/dev/null 2>&1 && applied=1
+		[ "$tcp53_ok" == "1" ] && iptables -t nat -I PREROUTING 1 -i "$br" -p tcp --dport 53 ! -d "$dst" -j DNAT --to-destination "$dst":53 >/dev/null 2>&1
+	done
+	if [ "$applied" != "1" ]; then
+		echo_date "DNS劫持(all)：53 改道规则写入失败，自动回退默认劫持(default)。"
+		clean_dns_force
+		return 1
+	fi
+	[ "$tcp53_ok" != "1" ] && echo_date "DNS劫持(all)：本机未监听 TCP/53，已跳过 TCP/53 改道（仅 UDP 强制 + DoT/DoH）。"
+
+	# 加密 DNS 拦截链（REJECT 不可用自动 DROP）
+	ipset -! create ss_doh nethash >/dev/null 2>&1 && ipset flush ss_doh >/dev/null 2>&1
+	# 已知公共 DoH/DoT 解析器 IP（Cloudflare/Google/Quad9/OpenDNS/AdGuard/CleanBrowsing/NextDNS 等）
+	for ip in 1.1.1.1 1.0.0.1 1.1.1.2 1.0.0.2 8.8.8.8 8.8.4.4 9.9.9.9 149.112.112.112 149.112.112.9 \
+		208.67.222.222 208.67.220.220 94.140.14.14 94.140.15.15 76.76.2.0 76.76.10.0 \
+		185.228.168.9 185.228.169.9 45.90.28.0 45.90.30.0; do
+		ipset -! add ss_doh "$ip" >/dev/null 2>&1
+	done
+	iptables -t filter -N SHADOWSOCKS_DNSF >/dev/null 2>&1
+	iptables -t filter -F SHADOWSOCKS_DNSF >/dev/null 2>&1
+	# DoT：TCP/UDP 853
+	iptables -t filter -A SHADOWSOCKS_DNSF -p tcp --dport 853 -j REJECT --reject-with tcp-reset >/dev/null 2>&1 || \
+		iptables -t filter -A SHADOWSOCKS_DNSF -p tcp --dport 853 -j DROP >/dev/null 2>&1
+	iptables -t filter -A SHADOWSOCKS_DNSF -p udp --dport 853 -j REJECT --reject-with icmp-port-unreachable >/dev/null 2>&1 || \
+		iptables -t filter -A SHADOWSOCKS_DNSF -p udp --dport 853 -j DROP >/dev/null 2>&1
+	# DoH：已知解析器 IP 的 443（TCP 与 UDP/HTTP3），REJECT 促浏览器回退明文 DNS
+	iptables -t filter -A SHADOWSOCKS_DNSF -p tcp --dport 443 -m set --match-set ss_doh dst -j REJECT --reject-with tcp-reset >/dev/null 2>&1 || \
+		iptables -t filter -A SHADOWSOCKS_DNSF -p tcp --dport 443 -m set --match-set ss_doh dst -j DROP >/dev/null 2>&1
+	iptables -t filter -A SHADOWSOCKS_DNSF -p udp --dport 443 -m set --match-set ss_doh dst -j REJECT --reject-with icmp-port-unreachable >/dev/null 2>&1 || \
+		iptables -t filter -A SHADOWSOCKS_DNSF -p udp --dport 443 -m set --match-set ss_doh dst -j DROP >/dev/null 2>&1
+	iptables -t filter -A SHADOWSOCKS_DNSF -j RETURN >/dev/null 2>&1
+	iptables -t filter -I FORWARD 1 -i br+ -j SHADOWSOCKS_DNSF >/dev/null 2>&1
+	echo_date DNS劫持：全部强制模式\(all\)已启用\(改道TCP/UDP-53，拦截DoT/DoH\)，确保白名单可靠生效。
+	return 0
+}
+
+# 清理 DNS 强制(all)产生的规则/集合（档位切换回退与停止流程复用）
+clean_dns_force(){
+	while iptables -t filter -D FORWARD -i br+ -j SHADOWSOCKS_DNSF >/dev/null 2>&1; do :; done
+	iptables -t filter -F SHADOWSOCKS_DNSF >/dev/null 2>&1
+	iptables -t filter -X SHADOWSOCKS_DNSF >/dev/null 2>&1
+	local br dst
+	for br in $(ifconfig 2>/dev/null | grep -E "^br" | awk '{print $1}'); do
+		dst=$(ifconfig "$br" | grep "inet addr" | awk '{print $2}' | awk -F: '{print $2}')
+		[ -n "$dst" ] || continue
+		while iptables -t nat -D PREROUTING -i "$br" -p udp --dport 53 ! -d "$dst" -j DNAT --to-destination "$dst":53 >/dev/null 2>&1; do :; done
+		while iptables -t nat -D PREROUTING -i "$br" -p tcp --dport 53 ! -d "$dst" -j DNAT --to-destination "$dst":53 >/dev/null 2>&1; do :; done
+	done
+	ipset -F ss_doh >/dev/null 2>&1 && ipset -X ss_doh >/dev/null 2>&1
 }
 
 # create ipset rules
@@ -2511,6 +2602,19 @@ create_ipset(){
 	ipset -! create router nethash && ipset flush router
 	ipset -! create chnroute nethash && ipset flush chnroute
 	sed -e "s/^/add chnroute &/g" /koolshare/ss/rules/chnroute.txt | awk '{print $0} END{print "COMMIT"}' | ipset -R
+}
+
+# 域名黑白名单预解析：主动解析域名A记录并直接写入ipset，不再只依赖dnsmasq被动填充。
+# 客户端走DoH/DoT或持有DNS缓存时会绕过路由器dnsmasq，白名单域名IP长期缺席white_list，
+# 就被mode链(CHN !chnroute / GLO 无条件)兜底代理——这正是"加白名单域名仍走代理"的根因。
+# 本函数在apply_nat_rules之前(add_white_black_ip内)调用，此时代理规则尚未建立，解析走直连。
+resolve_domain_to_ipset(){
+	local d="$1" setname="$2" dns="$3" ip ips=""
+	[ -n "$dns" ] && ips=`nslookup "$d" "$dns" 2>/dev/null | sed '1,4d' | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -v '^0\.'`
+	[ -z "$ips" ] && ips=`resolveip -4 -t 2 "$d" 2>/dev/null | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}'`
+	for ip in $ips; do
+		ipset -! add "$setname" "$ip" >/dev/null 2>&1
+	done
 }
 
 add_white_black_ip(){
@@ -2548,6 +2652,23 @@ add_white_black_ip(){
 		for ip in $ss_wan_white_ip
 		do
 			ipset -! add white_list $ip >/dev/null 2>&1
+		done
+	fi
+
+	# 域名黑白名单预解析(白名单失效的核心修复)：解析DNS用国内公共DNS，与直连语义一致。
+	# $CDN此阶段可能是127.0.0.1(smartdns/chinadns前端口)尚未就绪，回退到223.5.5.5。
+	local PRE_DNS="$CDN"
+	case "$PRE_DNS" in 127.0.0.1*|localhost*|""|:*) PRE_DNS="223.5.5.5" ;; esac
+	if [ -n "$ss_wan_white_domain" ];then
+		echo_date 预解析域名白名单到white_list，确保白名单域名可靠直连...
+		for d in `echo $ss_wan_white_domain|base64_decode`; do
+			detect_domain "$d" && resolve_domain_to_ipset "$d" white_list "$PRE_DNS"
+		done
+	fi
+	if [ -n "$ss_wan_black_domain" ];then
+		echo_date 预解析域名黑名单到black_list...
+		for d in `echo $ss_wan_black_domain|base64_decode`; do
+			detect_domain "$d" && resolve_domain_to_ipset "$d" black_list "$PRE_DNS"
 		done
 	fi
 }
@@ -2681,11 +2802,15 @@ apply_nat_rules(){
 	#-----------------------FOR GLOABLE---------------------
 	# 创建gfwlist模式nat rule
 	iptables -t nat -N SHADOWSOCKS_GLO
+	# 白名单最高优先(防御纵深，与主链SHADOWSOCKS的white RETURN一致，防经ACL直连mode链绕过)
+	iptables -t nat -A SHADOWSOCKS_GLO -p tcp -m set --match-set white_list dst -j RETURN
 	# IP黑名单控制-gfwlist（走ss）
 	iptables -t nat -A SHADOWSOCKS_GLO -p tcp -j REDIRECT --to-ports 3333
 	#-----------------------FOR GFWLIST---------------------
 	# 创建gfwlist模式nat rule
 	iptables -t nat -N SHADOWSOCKS_GFW
+	# 白名单最高优先(防御纵深)
+	iptables -t nat -A SHADOWSOCKS_GFW -p tcp -m set --match-set white_list dst -j RETURN
 	# IP/CIDR/黑域名 黑名单控制（走ss）
 	iptables -t nat -A SHADOWSOCKS_GFW -p tcp -m set --match-set black_list dst -j REDIRECT --to-ports 3333
 	# IP黑名单控制-gfwlist（走ss）
@@ -2693,6 +2818,8 @@ apply_nat_rules(){
 	#-----------------------FOR CHNMODE---------------------
 	# 创建大陆白名单模式nat rule
 	iptables -t nat -N SHADOWSOCKS_CHN
+	# 白名单最高优先(防御纵深)
+	iptables -t nat -A SHADOWSOCKS_CHN -p tcp -m set --match-set white_list dst -j RETURN
 	# IP/CIDR/域名 黑名单控制（走ss）
 	iptables -t nat -A SHADOWSOCKS_CHN -p tcp -m set --match-set black_list dst -j REDIRECT --to-ports 3333
 	# cidr黑名单控制-chnroute（走ss）
@@ -2700,6 +2827,8 @@ apply_nat_rules(){
 	#-----------------------FOR GAMEMODE---------------------
 	# 创建游戏模式nat rule
 	iptables -t nat -N SHADOWSOCKS_GAM
+	# 白名单最高优先(防御纵深)
+	iptables -t nat -A SHADOWSOCKS_GAM -p tcp -m set --match-set white_list dst -j RETURN
 	# IP/CIDR/域名 黑名单控制（走ss）
 	iptables -t nat -A SHADOWSOCKS_GAM -p tcp -m set --match-set black_list dst -j REDIRECT --to-ports 3333
 	# cidr黑名单控制-chnroute（走ss）
@@ -2707,24 +2836,61 @@ apply_nat_rules(){
 	#-----------------------FOR HOMEMODE---------------------
 	# 创建回国模式nat rule
 	 iptables -t nat -N SHADOWSOCKS_HOM
+	# 白名单最高优先(防御纵深)
+	iptables -t nat -A SHADOWSOCKS_HOM -p tcp -m set --match-set white_list dst -j RETURN
 	# IP/CIDR/域名 黑名单控制（走ss）
 	iptables -t nat -A SHADOWSOCKS_HOM -p tcp -m set --match-set black_list dst -j REDIRECT --to-ports 3333
 	# cidr黑名单控制-chnroute（走ss）
 	iptables -t nat -A SHADOWSOCKS_HOM -p tcp -m set --match-set chnroute dst -j REDIRECT --to-ports 3333
 
-	[ "$mangle" == "1" ] && load_tproxy
-	[ "$mangle" == "1" ] && ip rule add fwmark 0x07 table 310
-	[ "$mangle" == "1" ] && ip route add local 0.0.0.0/0 dev lo table 310
-	# 创建游戏模式udp rule
-	[ "$mangle" == "1" ] && iptables -t mangle -N SHADOWSOCKS
-	# IP/cidr/白域名 白名单控制（不走ss）
-	[ "$mangle" == "1" ] && iptables -t mangle -A SHADOWSOCKS -p udp -m set --match-set white_list dst -j RETURN
-	# 创建游戏模式udp rule
-	[ "$mangle" == "1" ] && iptables -t mangle -N $(get_action_chain $ss_basic_mode)
-	# IP/CIDR/域名 黑名单控制（走ss）
-	[ "$mangle" == "1" ] && iptables -t mangle -A $(get_action_chain $ss_basic_mode) -p udp -m set --match-set black_list dst -j TPROXY --on-port 3333 --tproxy-mark 0x07
-	# cidr黑名单控制-chnroute（走ss）
-	[ "$mangle" == "1" ] && iptables -t mangle -A $(get_action_chain $ss_basic_mode) -p udp -m set ! --match-set chnroute dst -j TPROXY --on-port 3333 --tproxy-mark 0x07
+	# UDP透明代理前置：TPROXY能力探测(B1) + fwmark/table冲突检测(B4)。
+	# 任一不满足则降级为TCP-only(mangle=""，后续所有UDP mangle/TPROXY规则自动跳过)，
+	# 境外UDP仍由filter层guard拦截并促TCP回退，绝不静默直连。
+	if [ "$mangle" == "1" ]; then
+		if ! load_tproxy; then
+			mangle=""
+		elif ip rule show 2>/dev/null | grep -qE "fwmark 0x7( |/|$)" && [ -z "`ip rule show 2>/dev/null | grep 'lookup 310'`" ]; then
+			# 别的组件占用了fwmark 0x07但不是我们的table 310路由，避免抢占
+			echo_date "检测到fwmark 0x07已被其它组件占用(QoS/VPN?)，为避免冲突降级为TCP-only。"
+			mangle=""
+		elif [ -n "`ip route show table 310 2>/dev/null`" ] && [ -z "`ip route show table 310 2>/dev/null | grep 'local 0.0.0.0/0 dev lo'`" ]; then
+			echo_date "检测到table 310已被其它组件占用，为避免冲突降级为TCP-only。"
+			mangle=""
+		else
+			ip rule add fwmark 0x07 table 310
+			ip route add local 0.0.0.0/0 dev lo table 310
+		fi
+	fi
+	if [ "$mangle" == "1" ]; then
+		# mangle UDP 总入口
+		iptables -t mangle -N SHADOWSOCKS
+		# DNS(UDP/53)优先RETURN，留给NAT层DNS劫持处理，避免LAN DNS查询被TPROXY误送入代理(B5)
+		iptables -t mangle -A SHADOWSOCKS -p udp --dport 53 -j RETURN
+		# IP/cidr/白域名 白名单控制（不走ss）
+		iptables -t mangle -A SHADOWSOCKS -p udp -m set --match-set white_list dst -j RETURN
+		# 预建全部模式的 mangle action 链，各填对应 UDP TPROXY 语义（镜像 nat 的 TCP 语义）。
+		# 否则混合 ACL（如主模式白名单、某设备 ACL 为游戏模式）会跳转到未创建的 SHADOWSOCKS_GAM
+		# 等链而报错、只留半套规则，脚本却仍报启动成功。
+		for MCHAIN in SHADOWSOCKS_GFW SHADOWSOCKS_CHN SHADOWSOCKS_GAM SHADOWSOCKS_GLO SHADOWSOCKS_HOM; do
+			iptables -t mangle -N $MCHAIN
+			# 白名单最高优先(防御纵深，镜像nat的mode链white RETURN，确保白名单UDP也直连)
+			iptables -t mangle -A $MCHAIN -p udp -m set --match-set white_list dst -j RETURN
+		done
+		# GFW：黑名单 + gfwlist 命中走代理
+		iptables -t mangle -A SHADOWSOCKS_GFW -p udp -m set --match-set black_list dst -j TPROXY --on-port 3333 --tproxy-mark 0x07
+		iptables -t mangle -A SHADOWSOCKS_GFW -p udp -m set --match-set gfwlist dst -j TPROXY --on-port 3333 --tproxy-mark 0x07
+		# CHN（大陆白名单）：黑名单 + 非大陆走代理
+		iptables -t mangle -A SHADOWSOCKS_CHN -p udp -m set --match-set black_list dst -j TPROXY --on-port 3333 --tproxy-mark 0x07
+		iptables -t mangle -A SHADOWSOCKS_CHN -p udp -m set ! --match-set chnroute dst -j TPROXY --on-port 3333 --tproxy-mark 0x07
+		# GAM（游戏）：与大陆白名单同，境外 UDP 走代理
+		iptables -t mangle -A SHADOWSOCKS_GAM -p udp -m set --match-set black_list dst -j TPROXY --on-port 3333 --tproxy-mark 0x07
+		iptables -t mangle -A SHADOWSOCKS_GAM -p udp -m set ! --match-set chnroute dst -j TPROXY --on-port 3333 --tproxy-mark 0x07
+		# GLO（全局）：全部 UDP 走代理
+		iptables -t mangle -A SHADOWSOCKS_GLO -p udp -j TPROXY --on-port 3333 --tproxy-mark 0x07
+		# HOM（回国）：黑名单 + 大陆走代理
+		iptables -t mangle -A SHADOWSOCKS_HOM -p udp -m set --match-set black_list dst -j TPROXY --on-port 3333 --tproxy-mark 0x07
+		iptables -t mangle -A SHADOWSOCKS_HOM -p udp -m set --match-set chnroute dst -j TPROXY --on-port 3333 --tproxy-mark 0x07
+	fi
 	#-------------------------------------------------------
 	# 局域网黑名单（不走ss）/局域网黑名单（走ss）
 	lan_acess_control
@@ -2741,7 +2907,7 @@ apply_nat_rules(){
 	# 如果主模式不是游戏模式，则不需要把SHADOWSOCKS链中剩余udp流量转发给SHADOWSOCKS_GAM，不然会造成其他模式主机的udp也走游戏模式
 	###[ "$mangle" == "1" ] && ss_acl_default_mode=3
 	[ "$ss_acl_default_mode" != "0" ] && [ "$ss_acl_default_mode" != "3" ] && [ "$ss_basic_udp_sync" != "1" ] && [ "$ss_basic_udp_sync" != "2" ]  && ss_acl_default_mode=0
-	[ "$ss_basic_mode" == "3" ] || [ "$ss_basic_udp_sync" == "1" ] || [ "$ss_basic_udp_sync" == "2" ]  && iptables -t mangle -A SHADOWSOCKS -p udp -j $(get_action_chain $ss_acl_default_mode)
+	[ "$mangle" == "1" ] && { [ "$ss_basic_mode" == "3" ] || [ "$ss_basic_udp_sync" == "1" ] || [ "$ss_basic_udp_sync" == "2" ]; } && iptables -t mangle -A SHADOWSOCKS -p udp -j $(get_action_chain $ss_acl_default_mode)
 	# 重定所有流量到 SHADOWSOCKS
 	KP_NU=`iptables -nvL PREROUTING -t nat |sed 1,2d | sed -n '/KOOLPROXY/='|head -n1`
 	[ "$KP_NU" == "" ] && KP_NU=0
@@ -2751,14 +2917,20 @@ apply_nat_rules(){
 		# 仅QUIC模式(ss_basic_udp_sync=2)且无游戏需求时，只把QUIC(UDP/443)导入透明代理链，
 		# 其余UDP一律直连，避免BT/视频/游戏等大流量UDP涌入TPROXY拖垮路由器CPU。
 		# 存在游戏模式主机(game_on)或主模式为游戏模式时，游戏需要全量UDP，自动回退到全量代理。
+		# 所有hook限定 -i br+：只接管LAN入站UDP，防WAN侧/其他接口的UDP误进TPROXY热路径。
+		# 用 -I PREROUTING 1 插到最前(B2)：确保插件先于其它mangle规则看到LAN UDP，避免被抢先改道。
 		if [ "$ss_basic_udp_sync" == "2" ] && [ -z "$game_on" ] && [ "$ss_basic_mode" != "3" ]; then
-			iptables -t mangle -A PREROUTING -p udp --dport 443 -j SHADOWSOCKS
-			echo_date 仅代理QUIC模式：只将境外QUIC（UDP/443）导入透明代理，其余UDP直连以降低路由器负载。
+			# 黑名单目标是"强制走代理"语义，其UDP全端口一并导入代理链(黑名单条目少，不增负载)，
+			# 与全量档一致；两条hook都跳SHADOWSOCKS，链内white-first + mode语义统一决策。
+			iptables -t mangle -I PREROUTING 1 -i br+ -p udp -m set --match-set black_list dst -j SHADOWSOCKS
+			# 普通目标只把QUIC(UDP/443)导入代理，其余UDP直连，降低ARMv7负载。
+			iptables -t mangle -I PREROUTING 1 -i br+ -p udp --dport 443 -j SHADOWSOCKS
+			echo_date 仅代理QUIC模式：境外QUIC（UDP/443）与黑名单目标UDP导入透明代理，其余UDP直连以降低路由器负载。
 		else
-			iptables -t mangle -A PREROUTING -p udp -j SHADOWSOCKS
+			iptables -t mangle -I PREROUTING 1 -i br+ -p udp -j SHADOWSOCKS
 		fi
 	fi
-	apply_quic_leak_guard
+	apply_forward_guard
 	apply_ipv6_leak_guard
 	# QOS开启的情况下
 	QOSO=`iptables -t mangle -S | grep -o QOSO | wc -l`
@@ -2769,20 +2941,31 @@ apply_nat_rules(){
 }
 
 dns_hijack_control(){
-	if [ "$ss_basic_dns_hijack" == "1" ];then
-		local VLAN_INDEXS=$(ifconfig | grep -E "^br" | awk '{print $1}' | sed 's/^br//g')
-		for VLAN_INDEX in ${VLAN_INDEXS}
-		do
-			local dest_ipaddr=$(ifconfig br${VLAN_INDEX} | grep "inet addr" | awk '{print $2}'|awk -F ":" '{print $2}')
-			iptables -t nat -N SHADOWSOCKS_DNS_${VLAN_INDEX} >/dev/null 2>&1
-			iptables -t nat -F SHADOWSOCKS_DNS_${VLAN_INDEX} >/dev/null 2>&1
-			iptables -t nat -A SHADOWSOCKS_DNS_${VLAN_INDEX} -p udp -j DNAT --to ${dest_ipaddr}:53
-		done
-	fi
+	local VLAN_INDEXS=$(ifconfig | grep -E "^br" | awk '{print $1}' | sed 's/^br//g')
+	for VLAN_INDEX in ${VLAN_INDEXS}
+	do
+		local dest_ipaddr=$(ifconfig br${VLAN_INDEX} | grep "inet addr" | awk '{print $2}'|awk -F ":" '{print $2}')
+		iptables -t nat -N SHADOWSOCKS_DNS_${VLAN_INDEX} >/dev/null 2>&1
+		iptables -t nat -F SHADOWSOCKS_DNS_${VLAN_INDEX} >/dev/null 2>&1
+		iptables -t nat -A SHADOWSOCKS_DNS_${VLAN_INDEX} -p udp -j DNAT --to ${dest_ipaddr}:53
+	done
 }
 
+# 默认劫持(default/1)：原 chromecast 行为，仅把 LAN 客户端 UDP/53 DNAT 到本机 dnsmasq。
+# 也作为 all 档前置校验失败时的回退目标。
+dns_hijack_default(){
+	dns_hijack_control
+	local VLAN_INDEXS=$(ifconfig | grep -E "^br" | awk '{print $1}' | sed 's/^br//g')
+	local INSET_NU_DNS=$((${INSET_NU} + 1))
+	for VLAN_INDEX in ${VLAN_INDEXS}
+	do
+		iptables -t nat -I PREROUTING "${INSET_NU_DNS}" -i br${VLAN_INDEX} -p udp -m udp --dport 53 -j SHADOWSOCKS_DNS_${VLAN_INDEX}
+		let INSET_NU_DNS+=1
+	done
+}
 
 chromecast(){
+	# 清理旧的默认劫持链跳转（SHADOWSOCKS_DNS_*）
 	chromecast_nu=`iptables -t nat -L PREROUTING -v -n --line-numbers|grep "SHADOWSOCKS_DNS_"|awk '{print $1}'|sort -r`
 	if [ -n "$chromecast_nu" ]; then
 		for chromecast_index in $chromecast_nu
@@ -2790,19 +2973,26 @@ chromecast(){
 			iptables -t nat -D PREROUTING $chromecast_index >/dev/null 2>&1
 		done
 	fi
-	if [ "$ss_basic_dns_hijack" == "1" ];then
-		echo_date 开启DNS劫持功能功能，防止DNS污染...
-		dns_hijack_control
-		local VLAN_INDEXS=$(ifconfig | grep -E "^br" | awk '{print $1}' | sed 's/^br//g')
-		local INSET_NU_DNS=$((${INSET_NU} + 1))
-		for VLAN_INDEX in ${VLAN_INDEXS}
-		do
-			iptables -t nat -I PREROUTING "${INSET_NU_DNS}" -i br${VLAN_INDEX} -p udp -m udp --dport 53 -j SHADOWSOCKS_DNS_${VLAN_INDEX}
-			let INSET_NU_DNS+=1
-		done
-	else
-		echo_date DNS劫持功能未开启，建议开启！
-	fi
+	# 清理旧的 all 档强制规则，避免档位切换后残留
+	clean_dns_force
+	# DNS劫持三档：0=关闭 / 1=default(仅UDP/53劫持) / 2=all(强制全部+拦DoT/DoH，带回退)
+	case "$ss_basic_dns_hijack" in
+		2)
+			if apply_dns_force; then
+				:
+			else
+				# all 前置校验失败：回退 default，保证至少不比原版差且 DNS 不断
+				dns_hijack_default
+			fi
+			;;
+		1)
+			echo_date 开启DNS劫持功能\(默认模式\)，防止DNS污染...
+			dns_hijack_default
+			;;
+		*)
+			echo_date DNS劫持功能未开启，建议开启！
+			;;
+	esac
 }
 # -----------------------------------nat part end--------------------------------------------------------
 

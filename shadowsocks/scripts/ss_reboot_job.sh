@@ -96,7 +96,7 @@ check_ip(){
 		HOST=`cat /tmp/ss_host.conf | cut -d "/" -f2`
 		OLD_IP=`cat /tmp/ss_host.conf | cut -d "/" -f3`
 		if [ -n "$HOST" ] && [ -n "$OLD_IP" ];then
-			NEW_IP=`nslookup "$HOST"  $get_server_resolver | sed '1,4d' | awk '{print $3}' | grep -v :|awk 'NR==1{print}'`
+			NEW_IP=`nslookup "$HOST"  $(get_server_resolver) | sed '1,4d' | awk '{print $3}' | grep -v :|awk 'NR==1{print}'`
 			if [ "$?" == "0" ];then
 				NEW_IP=`echo $NEW_IP|grep -E "([0-9]{1,3}[\.]){3}[0-9]{1,3}|:"`
 			else

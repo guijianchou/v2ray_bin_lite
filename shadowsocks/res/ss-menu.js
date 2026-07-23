@@ -275,7 +275,7 @@ function LoadingSSProgress(seconds) {
 	document.getElementById("LoadingBar").style.visibility = "visible";
 	if (action == 0) {
 		document.getElementById("loading_block3").innerHTML = "科学上网功能关闭中 ..."
-		$("#loading_block2").html("<li><font color='#ffcc00'><a href='https://github.com/cary-sas/v2ray_bin' target='_blank'></font>插件工作有问题？请到<em>GITHUB</em>提交issue...</font></li>");
+		$("#loading_block2").html("<li><font color='#ffcc00'><a href='https://github.com/guijianchou/v2ray_bin_lite' target='_blank'></font>插件工作有问题？请到<em>GITHUB</em>提交issue...</font></li>");
 	} else if (action == 1) {
 		document.getElementById("loading_block3").innerHTML = "gfwlist模式启用中 ..."
 		$("#loading_block2").html("<li><font color='#ffcc00'>此期间请勿访问屏蔽网址，以免污染DNS进入缓存</font></li><li><font color='#ffcc00'>尝试不同的DNS解析方案，可以达到最佳的效果哦...</font></li><li><font color='#ffcc00'>请等待日志显示完毕，并出现自动关闭按钮！</font></li><li><font color='#ffcc00'>在此期间请不要刷新本页面，不然可能导致问题！</font></li>");
@@ -438,13 +438,13 @@ function openssHint(itemNum) {
 		statusmenu += "</br></br><font color='#CC0066'>1&nbsp;&nbsp;</font>进入<a href='Tools_Shell.asp' target='_blank'><u><font color='#00F'>webshell</font></u></a>或者其他telnet,ssh等能输入命令的工具";
 		statusmenu += "</br><font color='#CC0066'>2&nbsp;&nbsp;</font>请依次输入以下命令，等待上一条命令执行完后再运行下一条(这里以回滚4.35.6为例)：";
 		statusmenu += "</br></br>&nbsp;&nbsp;&nbsp;&nbsp;cd /tmp";
-		statusmenu += "</br>&nbsp;&nbsp;&nbsp;&nbsp;curl -kLJO https://raw.githubusercontent.com/cary-sas/v2ray_bin/main/380_armv5_packge/4.35.6/shadowsocks.tar.gz";
+		statusmenu += "</br>&nbsp;&nbsp;&nbsp;&nbsp;curl -kLJO https://raw.githubusercontent.com/guijianchou/v2ray_bin_lite/main/380_armv5_packge/4.35.6/shadowsocks.tar.gz";
 		statusmenu += "</br>&nbsp;&nbsp;&nbsp;&nbsp;mv shadowsocks_4.1.7.tar.gz shadowsocks.tar.gz";
 		statusmenu += "</br>&nbsp;&nbsp;&nbsp;&nbsp;tar -zxvf /tmp/shadowsocks.tar.gz";
 		statusmenu += "</br>&nbsp;&nbsp;&nbsp;&nbsp;chmod +x /tmp/shadowsocks/install.sh";
 		statusmenu += "</br>&nbsp;&nbsp;&nbsp;&nbsp;sh /tmp/shadowsocks/install.sh";
 		statusmenu += "</br></br>最后一条命令输入完后不会有任何打印信息。";
-		statusmenu += "</br>回滚其它版本号，请参考<a href='https://github.com/cary-sas/v2ray_bin/blob/main/380_armv5_packge' target='_blank'><u><font color='#00F'>版本历史列表</font></u></a>";
+		statusmenu += "</br>回滚其它版本号，请参考<a href='https://github.com/guijianchou/v2ray_bin_lite/blob/main/380_armv5_packge' target='_blank'><u><font color='#00F'>版本历史列表</font></u></a>";
 		_caption = "shadowsocks for merlin 版本";
 	} else if (itemNum == 13) {
 		statusmenu = "&nbsp;&nbsp;&nbsp;&nbsp;SSR表示shadowwocksR-libev，相比较原版shadowwocksR-libev，其提供了强大的协议混淆插件，让你避开gfw的侦测。"
@@ -813,7 +813,7 @@ function openssHint(itemNum) {
 		_caption = "说明：";
 	} else if (itemNum == 106) {
 		width = "600px";
-		statusmenu = "DNS劫持（原chromecast功能）.<br />&nbsp;&nbsp;&nbsp;&nbsp;开启该功能后，局域网内所有客户端的DNS解析请求将会被强制劫持到使用路由器提供的DNS进行解析，以避免DNS污染。<br />&nbsp;&nbsp;&nbsp;&nbsp;例如当局域网内有用户在电脑上自定义DNS解析服务器为8.8.8.8时候，该电脑向8.8.8.8的DNS请求，将会被强制劫持到路由器的dns服务器如：192.168.50.1，例如访问谷歌网站，虽然路由器本身已经具备访问能力，但是如果设备请求道了污染的DNS，会导致该设备无法访问谷歌，所以当你无法控制局域网内一些设备自定义DNS行为的情况下，启用该功能可以保证局域网内所有客户端不会受到DNS污染。"
+		statusmenu = "DNS劫持（原chromecast功能）.<br />&nbsp;&nbsp;&nbsp;&nbsp;把局域网客户端的DNS解析强制交给路由器dnsmasq，避免DNS污染；同时也是“黑白名单/大陆白名单”可靠生效的前提——白名单域名靠dnsmasq解析时把IP写入白名单集合，客户端若绕过dnsmasq，白名单域名的真实IP就不会被放行而仍走代理。<br />&nbsp;&nbsp;&nbsp;&nbsp;<b>三个档位：</b><br />&nbsp;&nbsp;&nbsp;&nbsp;<b>关闭</b>：不劫持，客户端可自定义DNS。<br />&nbsp;&nbsp;&nbsp;&nbsp;<b>默认（原chromecast）</b>：只把明文 UDP/53 劫持到路由器DNS。对付设备手动设8.8.8.8等明文DNS足够，但挡不住浏览器/系统的DoH/DoT。<br />&nbsp;&nbsp;&nbsp;&nbsp;<b>全部（推荐用于大陆白名单）</b>：在“默认”基础上再劫持 TCP/53，并拦截 DoT(853) 与常见 DoH 解析器IP的443，逼客户端回退明文DNS→被路由器接管。这样白名单域名（含Cloudflare/CDN站）连接的真实IP才能可靠进入白名单直连，解决“加了白名单仍走代理/CF盾显示代理出口IP”。代价：会接管设备上自设的私有DNS/DoH。<br />&nbsp;&nbsp;&nbsp;&nbsp;<b>出错回退</b>：选“全部”时若检测到本机dnsmasq未运行等异常，会自动回退到“默认”模式，避免把全网DNS改道到不存在的服务导致断网。"
 		_caption = "说明：";
 	} else if (itemNum == 107) {
 		width = "600px";

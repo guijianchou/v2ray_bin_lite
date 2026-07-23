@@ -2040,19 +2040,9 @@ remove_online(){
 
 change_cru(){
 	echo ==================================================================================================
+	# 节点订阅入口已从 Web UI 移除：不再注册订阅定时任务，仅做清理（防历史 cron 残留）。
+	echo_date "订阅功能入口已移除，清理订阅定时任务。"
 	sed -i '/ssnodeupdate/d' /var/spool/cron/crontabs/* >/dev/null 2>&1
-	if [ "$ss_basic_node_update" = "1" ];then
-		if [ "$ss_basic_node_update_day" = "7" ];then
-			cru a ssnodeupdate "2 $ss_basic_node_update_hr * * * /bin/sh /koolshare/scripts/ss_online_update.sh 3"
-			echo_date "设置自动更新订阅服务在每天 $ss_basic_node_update_hr 点。"
-		else
-			cru a ssnodeupdate "2 $ss_basic_node_update_hr * * $ss_basic_node_update_day /bin/sh /koolshare/scripts/ss_online_update.sh 3"
-			echo_date "设置自动更新订阅服务在星期 $ss_basic_node_update_day 的 $ss_basic_node_update_hr 点。"
-		fi
-	else
-		echo_date "关闭自动更新订阅服务！"
-		sed -i '/ssnodeupdate/d' /var/spool/cron/crontabs/* >/dev/null 2>&1
-	fi
 }
 
 case $ss_online_action in
