@@ -60,6 +60,26 @@ fi
 	fi
 }
 
+# 游戏模式仅支持SS协议(ss-libev, type 0)节点：其它协议(SSR/V2Ray/Xray/Trojan/Naive/Hysteria2/
+# AnyTLS，含经xray运行的SS2022)跑游戏模式的全量UDP透明代理对路由器负载过重，UDP需求已由
+# 「同步UDP与TCP」三档(关闭/仅代理QUIC/全量UDP)覆盖。非SS节点下强制回退并按新状态重算mangle。
+if [ "$ss_basic_type" != "0" ];then
+	if [ "$ss_basic_mode" == "3" ];then
+		echo_date "游戏模式仅支持SS协议节点，已自动回退为大陆白名单模式！UDP需求请使用【同步UDP与TCP】功能。"
+		ss_basic_mode=2
+		dbus set ss_basic_mode=2
+	fi
+	if [ -n "$game_on" ];then
+		echo_date "访问控制中的游戏模式主机仅支持SS协议节点，其TCP按大陆白名单处理，UDP按【同步UDP与TCP】档位处理。"
+		game_on=""
+	fi
+	# 剩余主机默认模式若为游戏模式同样降级（仅运行时，UI由主模式联动刷新）
+	[ "$ss_acl_default_mode" == "3" ] && ss_acl_default_mode=2
+	# game_on已清空且mode!=3，mangle仅由「同步UDP与TCP」档位决定
+	mangle=""
+	[ "$ss_basic_udp_sync" == "1" ] || [ "$ss_basic_udp_sync" == "2" ] && mangle=1
+fi
+
 # UDP透明入站能力校验："同步UDP与TCP"三档(0关闭/2仅QUIC/1全量)与游戏模式共用此判定，
 # 档位即开关，无额外门禁。支持透明UDP的核心：
 # - ss-redir系(type 0/1/2: ss-redir/rss-redir/koolgame)：ss-redir原生 -U + mangle TPROXY→3333；
@@ -271,16 +291,6 @@ kill_process(){
 		echo_date 关闭smartdns进程...
 		killall smartdns >/dev/null 2>&1
 	fi
-	koolgame_process=`pidof koolgame`
-	if [ -n "$koolgame_process" ];then 
-		echo_date 关闭koolgame进程...
-		killall koolgame >/dev/null 2>&1
-	fi
-	pdu_process=`pidof pdu`
-	if [ -n "$pdu_process" ];then 
-		echo_date 关闭pdu进程...
-		kill -9 $pdu >/dev/null 2>&1
-	fi
 	client_linux_arm5_process=`pidof client_linux_arm5`
 	if [ -n "$client_linux_arm5_process" ];then 
 		echo_date 关闭kcp协议进程...
@@ -290,21 +300,6 @@ kill_process(){
 	if [ -n "$haproxy_process" ];then 
 		echo_date 关闭haproxy进程...
 		killall haproxy >/dev/null 2>&1
-	fi
-	speederv1_process=`pidof speederv1`
-	if [ -n "$speederv1_process" ];then 
-		echo_date 关闭speederv1进程...
-		killall speederv1 >/dev/null 2>&1
-	fi
-	speederv2_process=`pidof speederv2`
-	if [ -n "$speederv2_process" ];then 
-		echo_date 关闭speederv2进程...
-		killall speederv2 >/dev/null 2>&1
-	fi
-	ud2raw_process=`pidof udp2raw`
-	if [ -n "$ud2raw_process" ];then 
-		echo_date 关闭ud2raw进程...
-		killall udp2raw >/dev/null 2>&1
 	fi
 	https_dns_proxy_process=`pidof https_dns_proxy`
 	if [ -n "$https_dns_proxy_process" ];then 
@@ -425,31 +420,6 @@ create_ss_json(){
 			    "method":"$ss_basic_method"
 			}
 		EOF
-	elif [ "$ss_basic_type" == "2" ];then
-		echo_date 创建koolgame配置文件到$CONFIG_FILE
-		cat > $CONFIG_FILE <<-EOF
-			{
-			    "server":"$ss_basic_server",
-			    "server_port":$ss_basic_port,
-			    "local_port":3333,
-			    "sock5_port":23456,
-			    "dns2ss":7913,
-			    "adblock_addr":"",
-			    "dns_server":"$ss_dns2ss_user",
-			    "password":"$ss_basic_password",
-			    "timeout":600,
-			    "method":"$ss_basic_method",
-			    "use_tcp":$ss_basic_koolgame_udp
-			}
-		EOF
-	fi
-	
-	if [ "$ss_basic_udp2raw_boost_enable" == "1" ] || [ "$ss_basic_udp_boost_enable" == "1" ];then
-		if [ "$ss_basic_udp_upstream_mtu" == "1" ] && [ "$ss_basic_udp_node" == "$ssconf_basic_node" ];then
-			echo_date 设定MTU为 $ss_basic_udp_upstream_mtu_value
-			cat /koolshare/ss/ss.json | jq --argjson MTU $ss_basic_udp_upstream_mtu_value '. + {MTU: $MTU}' > /koolshare/ss/ss_tmp.json
-			mv /koolshare/ss/ss_tmp.json /koolshare/ss/ss.json
-		fi
 	fi
 }
 
@@ -1039,80 +1009,6 @@ start_kcp(){
 	fi
 }
 
-start_speeder(){
-	#只有游戏模式下或者访问控制中有游戏模式主机，且udp加速节点和当前使用节点一致
-	if [ "$ss_basic_use_kcp" == "1" ] && [ "$ss_basic_kcp_server" == "127.0.0.1" ] && [ "$ss_basic_kcp_port" == "1092" ];then
-		echo_date 检测到你配置了KCP与UDPspeeder串联.
-		SPEED_KCP=1
-	fi
-	
-	if [ "$ss_basic_use_kcp" == "1" ] && [ "$ss_basic_kcp_server" == "127.0.0.1" ] && [ "$ss_basic_kcp_port" == "1093" ];then
-		echo_date 检测到你配置了KCP与UDP2raw串联.
-		SPEED_KCP=2
-	fi
-		
-	if [ "$mangle" == "1" ] && [ "$ss_basic_udp_node" == "$ssconf_basic_node" ] || [ "$SPEED_KCP" == "1" ] || [ "$SPEED_KCP" == "2" ];then
-		#开启udpspeeder
-		if [ "$ss_basic_udp_boost_enable" == "1" ];then
-			if [ "$ss_basic_udp_software" == "1" ];then
-				echo_date 开启UDPspeederV1进程.
-				[ -n "$ss_basic_udpv1_duplicate_time" ] && duplicate_time="-t $ss_basic_udpv1_duplicate_time" || duplicate_time=""
-				[ -n "$ss_basic_udpv1_jitter" ] && jitter="-j $ss_basic_udpv1_jitter" || jitter=""
-				[ -n "$ss_basic_udpv1_report" ] && report="--report $ss_basic_udpv1_report" || report=""
-				[ -n "$ss_basic_udpv1_drop" ] && drop="--random-drop $ss_basic_udpv1_drop" || drop=""
-				[ -n "$ss_basic_udpv1_duplicate_nu" ] && duplicate="-d $ss_basic_udpv1_duplicate_nu" || duplicate=""
-				[ -n "$ss_basic_udpv1_password" ] && key1="-k $ss_basic_udpv1_password" || key1=""
-				[ "$ss_basic_udpv1_disable_filter" == "1" ] && filter="--disable-filter" || filter=""
-
-				if [ "$ss_basic_udp2raw_boost_enable" == "1" ];then
-					#串联：如果两者都开启了，则把udpspeeder的流udp量转发给udp2raw
-					speederv1 -c -l 0.0.0.0:1092 -r 127.0.0.1:1093 $key1 $ss_basic_udpv1_password \
-					$duplicate_time $jitter $report $drop $filter $duplicate $ss_basic_udpv1_duplicate_nu >/dev/null 2>&1 &
-					#如果只开启了udpspeeder，则把udpspeeder的流udp量转发给服务器
-				else
-					speederv1 -c -l 0.0.0.0:1092 -r $ss_basic_udpv1_rserver:$ss_basic_udpv1_rport $key1 \
-					$duplicate_time $jitter $report $drop $filter $duplicate $ss_basic_udpv1_duplicate_nu >/dev/null 2>&1 &
-				fi
-			elif [ "$ss_basic_udp_software" == "2" ];then
-				echo_date 开启UDPspeederV2进程.
-				[ "$ss_basic_udpv2_disableobscure" == "1" ] && disable_obscure="--disable-obscure" || disable_obscure=""
-				[ "$ss_basic_udpv2_disablechecksum" == "1" ] && disable_checksum="--disable-checksum" || disable_checksum=""
-				[ -n "$ss_basic_udpv2_timeout" ] && timeout="--timeout $ss_basic_udpv2_timeout" || timeout=""
-				[ -n "$ss_basic_udpv2_mode" ] && mode="--mode $ss_basic_udpv2_mode" || mode=""
-				[ -n "$ss_basic_udpv2_report" ] && report="--report $ss_basic_udpv2_report" || report=""
-				[ -n "$ss_basic_udpv2_mtu" ] && mtu="--mtu $ss_basic_udpv2_mtu" || mtu=""
-				[ -n "$ss_basic_udpv2_jitter" ] && jitter="--jitter $ss_basic_udpv2_jitter" || jitter=""
-				[ -n "$ss_basic_udpv2_interval" ] && interval="-interval $ss_basic_udpv2_interval" || interval=""
-				[ -n "$ss_basic_udpv2_drop" ] && drop="-random-drop $ss_basic_udpv2_drop" || drop=""
-				[ -n "$ss_basic_udpv2_password" ] && key2="-k $ss_basic_udpv2_password" || key2=""
-				[ -n "$ss_basic_udpv2_fec" ] && fec="-f $ss_basic_udpv2_fec" || fec=""
-
-				if [ "$ss_basic_udp2raw_boost_enable" == "1" ];then
-					#串联：如果两者都开启了，则把udpspeeder的流udp量转发给udp2raw
-					speederv2 -c -l 0.0.0.0:1092 -r 127.0.0.1:1093 $key2 \
-					$fec $timeout $mode $report $mtu $jitter $interval $drop $disable_obscure $disable_checksum $ss_basic_udpv2_other --fifo /tmp/fifo.file >/dev/null 2>&1 &
-					#如果只开启了udpspeeder，则把udpspeeder的流udp量转发给服务器
-				else
-					speederv2 -c -l 0.0.0.0:1092 -r $ss_basic_udpv2_rserver:$ss_basic_udpv2_rport $key2 \
-					$fec $timeout $mode $report $mtu $jitter $interval $drop $disable_obscure $disable_checksum $ss_basic_udpv2_other --fifo /tmp/fifo.file >/dev/null 2>&1 &
-				fi
-			fi
-		fi
-		#开启udp2raw
-		if [ "$ss_basic_udp2raw_boost_enable" == "1" ];then
-			echo_date 开启UDP2raw进程.
-			[ "$ss_basic_udp2raw_a" == "1" ] && UD2RAW_EX1="-a" || UD2RAW_EX1=""
-			[ "$ss_basic_udp2raw_keeprule" == "1" ] && UD2RAW_EX2="--keep-rule" || UD2RAW_EX2=""
-			[ -n "$ss_basic_udp2raw_lowerlevel" ] && UD2RAW_LOW="--lower-level $ss_basic_udp2raw_lowerlevel" || UD2RAW_LOW=""
-			[ -n "$ss_basic_udp2raw_password" ] && key3="-k $ss_basic_udp2raw_password" || key3=""
-			
-			udp2raw -c -l 0.0.0.0:1093 -r $ss_basic_udp2raw_rserver:$ss_basic_udp2raw_rport $key3 $UD2RAW_EX1 $UD2RAW_EX2\
-			--raw-mode $ss_basic_udp2raw_rawmode --cipher-mode $ss_basic_udp2raw_ciphermode --auth-mode $ss_basic_udp2raw_authmode \
-			$UD2RAW_LOW $ss_basic_udp2raw_other >/dev/null 2>&1 &
-		fi
-	fi
-}
-
 start_ss_redir(){
 	if [ "$ss_basic_type" == "1" ];then
 		echo_date 开启ssr-redir进程，用于透明代理.
@@ -1125,89 +1021,27 @@ start_ss_redir(){
 		BIN=ss-redir
 	fi
 
-	if [ "$ss_basic_udp_boost_enable" == "1" ];then
-		#只要udpspeeder开启，不管udp2raw是否开启，均设置为1092,
-		SPEED_PORT=1092
-	else
-		# 如果只开了udp2raw，则需要吧udp转发到1093
-		SPEED_PORT=1093
-	fi
-
-	if [ "$ss_basic_udp2raw_boost_enable" == "1" ] || [ "$ss_basic_udp_boost_enable" == "1" ];then
-		#udp2raw开启，udpspeeder未开启则ss-redir的udp流量应该转发到1093
-		SPEED_UDP=1
-	fi
-	
-	if [ "$ss_basic_use_kcp" == "1" ] && [ "$ss_basic_kcp_server" == "127.0.0.1" ] && [ "$ss_basic_kcp_port" == "1092" ];then
-		SPEED_KCP=1
-	fi
-	
-	if [ "$ss_basic_use_kcp" == "1" ] && [ "$ss_basic_kcp_server" == "127.0.0.1" ] && [ "$ss_basic_kcp_port" == "1093" ];then
-		SPEED_KCP=2
-	fi
 	# Start ss-redir
 	if [ "$ss_basic_use_kcp" == "1" ];then
 		if [ "$mangle" == "1" ];then
-			if [ "$SPEED_UDP" == "1" ] && [ "$ss_basic_udp_node" == "$ssconf_basic_node" ];then
-				# tcp go kcp
-				if [ "$SPEED_KCP" == "1" ];then
-					echo_date $BIN的 tcp 走kcptun, kcptun的 udp 走 udpspeeder
-				elif [ "$SPEED_KCP" == "2" ];then
-					echo_date $BIN的 tcp 走kcptun, kcptun的 udp 走 udpraw
-				else
-					echo_date $BIN的 tcp 走kcptun.
-				fi
-				$BIN -s 127.0.0.1 -p 1091 -c $CONFIG_FILE $ARG_V2RAY_PLUGIN -f /var/run/shadowsocks.pid >/dev/null 2>&1
-				# udp go udpspeeder
-				[ "$ss_basic_udp2raw_boost_enable" == "1" ]  && [ "$ss_basic_udp_boost_enable" == "1" ] && echo_date $BIN的 udp 走udpspeeder, udpspeeder的 udp 走 udpraw
-				[ "$ss_basic_udp2raw_boost_enable" == "1" ]  && [ "$ss_basic_udp_boost_enable" != "1" ] && echo_date $BIN的 udp 走udpraw.
-				[ "$ss_basic_udp2raw_boost_enable" != "1" ]  && [ "$ss_basic_udp_boost_enable" == "1" ] && echo_date $BIN的 udp 走udpspeeder.
-				[ "$ss_basic_udp2raw_boost_enable" != "1" ]  && [ "$ss_basic_udp_boost_enable" != "1" ] && echo_date $BIN的 udp 走$BIN.
-				$BIN -s 127.0.0.1 -p $SPEED_PORT -c $CONFIG_FILE $ARG_V2RAY_PLUGIN -U -f /var/run/shadowsocks.pid >/dev/null 2>&1
-			else
-				# tcp go kcp
-				if [ "$SPEED_KCP" == "1" ];then
-					echo_date $BIN的 tcp 走kcptun, kcptun的 udp 走 udpspeeder
-				elif [ "$SPEED_KCP" == "2" ];then
-					echo_date $BIN的 tcp 走kcptun, kcptun的 udp 走 udpraw
-				else
-					echo_date $BIN的 tcp 走kcptun.
-				fi
-				$BIN -s 127.0.0.1 -p 1091 -c $CONFIG_FILE $ARG_V2RAY_PLUGIN -f /var/run/shadowsocks.pid >/dev/null 2>&1
-				# udp go ss
-				echo_date $BIN的 udp 走$BIN.
-				$BIN -c $CONFIG_FILE $ARG_V2RAY_PLUGIN -U -f /var/run/shadowsocks.pid >/dev/null 2>&1
-			fi
+			# tcp go kcp
+			echo_date $BIN的 tcp 走kcptun.
+			$BIN -s 127.0.0.1 -p 1091 -c $CONFIG_FILE $ARG_V2RAY_PLUGIN -f /var/run/shadowsocks.pid >/dev/null 2>&1
+			# udp go ss
+			echo_date $BIN的 udp 走$BIN.
+			$BIN -c $CONFIG_FILE $ARG_V2RAY_PLUGIN -U -f /var/run/shadowsocks.pid >/dev/null 2>&1
 		else
 			# tcp only go kcp
-			if [ "$SPEED_KCP" == "1" ];then
-				echo_date $BIN的 tcp 走kcptun, kcptun的 udp 走 udpspeeder
-			elif [ "$SPEED_KCP" == "2" ];then
-				echo_date $BIN的 tcp 走kcptun, kcptun的 udp 走 udpraw
-			else
-				echo_date $BIN的 tcp 走kcptun.
-			fi
+			echo_date $BIN的 tcp 走kcptun.
 			echo_date $BIN的 udp 未开启.
 			$BIN -s 127.0.0.1 -p 1091 -c $CONFIG_FILE $ARG_V2RAY_PLUGIN -f /var/run/shadowsocks.pid >/dev/null 2>&1
 		fi
 	else
 		if [ "$mangle" == "1" ];then
-			if [ "$SPEED_UDP" == "1" ] && [ "$ss_basic_udp_node" == "$ssconf_basic_node" ];then
-				# tcp go ss
-				echo_date $BIN的 tcp 走$BIN.
-				$BIN -c $CONFIG_FILE $ARG_V2RAY_PLUGIN -f /var/run/shadowsocks.pid >/dev/null 2>&1
-				# udp go udpspeeder
-				[ "$ss_basic_udp2raw_boost_enable" == "1" ]  && [ "$ss_basic_udp_boost_enable" == "1" ] && echo_date $BIN的 udp 走udpspeeder, udpspeeder的 udp 走 udpraw
-				[ "$ss_basic_udp2raw_boost_enable" == "1" ]  && [ "$ss_basic_udp_boost_enable" != "1" ] && echo_date $BIN的 udp 走udpraw.
-				[ "$ss_basic_udp2raw_boost_enable" != "1" ]  && [ "$ss_basic_udp_boost_enable" == "1" ] && echo_date $BIN的 udp 走udpspeeder.
-				[ "$ss_basic_udp2raw_boost_enable" != "1" ]  && [ "$ss_basic_udp_boost_enable" != "1" ] && echo_date $BIN的 udp 走$BIN.
-				$BIN -s 127.0.0.1 -p $SPEED_PORT -c $CONFIG_FILE $ARG_V2RAY_PLUGIN -U -f /var/run/shadowsocks.pid >/dev/null 2>&1
-			else
-				# tcp udp go ss
-				echo_date $BIN的 tcp 走$BIN.
-				echo_date $BIN的 udp 走$BIN.
-				$BIN -c $CONFIG_FILE $ARG_V2RAY_PLUGIN -u -f /var/run/shadowsocks.pid >/dev/null 2>&1
-			fi
+			# tcp udp go ss
+			echo_date $BIN的 tcp 走$BIN.
+			echo_date $BIN的 udp 走$BIN.
+			$BIN -c $CONFIG_FILE $ARG_V2RAY_PLUGIN -u -f /var/run/shadowsocks.pid >/dev/null 2>&1
 		else
 			# tcp only go ss
 			echo_date $BIN的 tcp 走$BIN.
@@ -1216,36 +1050,6 @@ start_ss_redir(){
 		fi
 	fi
 	echo_date $BIN 启动完毕！.
-	
-	start_speeder
-}
-
-start_koolgame(){
-	# Start koolgame
-	pdu=`ps|grep pdu|grep -v grep`
-	if [ -z "$pdu" ]; then
-	echo_date 开启pdu进程，用于优化mtu...
-		pdu br0 /tmp/var/pdu.pid >/dev/null 2>&1
-		sleep 1
-	fi
-	echo_date 开启koolgame主进程...
-	start-stop-daemon -S -q -b -m -p /tmp/var/koolgame.pid -x /koolshare/bin/koolgame -- -c $CONFIG_FILE
-	
-	if [ "$mangle" == "1" ] && [ "$ss_basic_udp_node" == "$ssconf_basic_node" ];then
-		if [ "$ss_basic_udp_boost_enable" == "1" ];then
-			if [ "$ss_basic_udp_software" == "1" ];then
-				echo_date 检测到你启用了UDPspeederV1，但是koolgame下不支持UDPspeederV1加速，不启用！
-				dbus set ss_basic_udp_boost_enable=0
-			elif [ "$ss_basic_udp_software" == "2" ];then
-				echo_date 检测到你启用了UDPspeederV2，但是koolgame下不支持UDPspeederV1加速，不启用！
-				dbus set ss_basic_udp_boost_enable=0
-			fi
-		fi
-		if [ "$ss_basic_udp2raw_boost_enable" == "1" ];then
-			echo_date 检测到你启用了UDP2raw，但是koolgame下不支持UDP2raw，不启用！
-			dbus set ss_basic_udp2raw_boost_enable=0
-		fi
-	fi
 }
 
 get_function_switch() {
@@ -2520,17 +2324,27 @@ apply_forward_guard(){
 # 对策：强制 LAN 客户端 DNS 走本机 dnsmasq。
 #   1) 明文 DNS(UDP+TCP/53) 改道到本机 dnsmasq（原版仅劫持 UDP/53，这里补 TCP/53）；
 #   2) 拦 DoT(853) 与已知 DoH 解析器 IP 的 443(TCP/QUIC)，逼客户端回退明文 DNS→被改道。
-# 出错回退：改道前校验本机 dnsmasq 在跑，否则返回 1，由 chromecast 回退到 default(仅UDP/53劫持)，
-# 避免把全网 DNS 改道到不存在的监听导致断网。只作用于转发的客户端流量(FORWARD/PREROUTING -i br+)，
-# 不影响路由器自身上游 DNS(走 OUTPUT)。返回 0=已接管，返回 1=前置校验失败需回退 default。
+# 出错回退：改道前等待本机 dnsmasq 就绪(service restart_dnsmasq 为异步，重启/替换fastlookup期间
+# 瞬时单次探测会把"正在重启"误判为"未运行")，超时仍未就绪才返回 1，由 chromecast 回退到
+# default(仅UDP/53劫持)，避免把全网 DNS 改道到不存在的监听导致断网。只作用于转发的客户端流量
+# (FORWARD/PREROUTING -i br+)，不影响路由器自身上游 DNS(走 OUTPUT)。返回 0=已接管，返回 1=前置校验失败需回退 default。
 apply_dns_force(){
 	[ "$ss_basic_dns_hijack" == "2" ] || return 1
 
 	# 前置校验（回退依据）：本机 dnsmasq 必须在运行，否则强制改道 = 全网 DNS 中断。
-	if ! pidof dnsmasq >/dev/null 2>&1; then
-		echo_date "DNS劫持(all)：本机 dnsmasq 未运行，强制改道会导致DNS中断，自动回退默认劫持(default)。"
-		return 1
-	fi
+	# 就绪标准 = 进程在跑且 UDP/53 已监听（改道目标可应答）。等待而非单次判死：
+	# service restart_dnsmasq 是异步的(fastlookup替换/还原后同样经它完成换血)，
+	# 校验瞬间可能正处于init重启dnsmasq的间隙，一次性探测会误回退 default。
+	local wait_i=0
+	until pidof dnsmasq >/dev/null 2>&1 && netstat -unl 2>/dev/null | grep -qE "[:.]53[[:space:]]"; do
+		if [ "$wait_i" -ge 30 ]; then
+			echo_date "DNS劫持(all)：等待30秒后本机 dnsmasq 仍未就绪，强制改道会导致DNS中断，自动回退默认劫持(default)。"
+			return 1
+		fi
+		[ "$wait_i" == "0" ] && echo_date "DNS劫持(all)：本机 dnsmasq 未就绪（可能正被重启或替换为fastlookup），等待其启动..."
+		wait_i=$((wait_i + 1))
+		sleep 1
+	done
 	# TCP/53 能力探测（软降级，不触发整体回退）：本机无 TCP/53 监听则跳过 TCP 改道，
 	# 避免把 TCP DNS 改道到不应答的端口。UDP 强制 + DoT/DoH 仍生效。
 	local tcp53_ok=0
@@ -2748,6 +2562,8 @@ lan_acess_control(){
 			ipaddr_hex=`dbus get ss_acl_ip_$acl | awk -F "." '{printf ("0x%02x", $1)} {printf ("%02x", $2)} {printf ("%02x", $3)} {printf ("%02x\n", $4)}'`
 			ports=`dbus get ss_acl_port_$acl`
 			proxy_mode=`dbus get ss_acl_mode_$acl`
+			# 游戏模式仅限SS协议：非SS节点下该主机按大陆白名单处理(TCP走CHN链，UDP不做全量mangle)
+			[ "$proxy_mode" == "3" ] && [ "$ss_basic_type" != "0" ] && proxy_mode=2
 			proxy_name=`dbus get ss_acl_name_$acl`
 			if [ "$ports" == "all" ];then
 				ports=""
@@ -3159,19 +2975,35 @@ detect(){
 }
 
 mount_dnsmasq(){
-	killall dnsmasq >/dev/null 2>&1
+	# bind mount只影响之后的路径解析，不影响正在运行的dnsmasq进程，因此无需killall；
+	# 真正的进程换血由随后的service restart_dnsmasq完成(init内部stop→start，间隙极短)，
+	# 不再人为制造"已杀等init异步拉起"的DNS中断窗口(DNS劫持default/all两档下全网DNS都指向本机)。
+	# 挂载前预检：用fastlookup二进制试析当前系统配置。该fork基于2015年上游(2.7x)，遇到新固件
+	# 写入的未知配置项会启动即退出；架构不兼容时执行本身就会失败。预检不过则拒绝替换保留原版，
+	# 避免替换后dnsmasq起不来导致全网断DNS(选项3下还会跨插件开关持续)。
+	if ! /koolshare/bin/dnsmasq --test -C /etc/dnsmasq.conf >/dev/null 2>&1;then
+		echo_date "【dnsmasq替换】：dnsmasq-fastlookup与当前固件的dnsmasq配置不兼容，取消替换，继续使用原版dnsmasq！"
+		return 1
+	fi
 	mount --bind /koolshare/bin/dnsmasq /usr/sbin/dnsmasq
-	#service restart_dnsmasq >/dev/null 2>&
 }
 
 umount_dnsmasq(){
-	killall dnsmasq >/dev/null 2>&1
-	umount /usr/sbin/dnsmasq
+	# 惰性卸载(-l)：挂载立即从命名空间摘除，之后的路径解析回到原版；正在运行的fastlookup进程
+	# 继续持有旧inode直至service restart_dnsmasq换回原版，同样无需killall制造中断窗口。
+	# 循环卸载以清理历史上可能叠加的多层bind mount；-l不可用时回退为杀进程后普通卸载。
+	local umnt_i=0
+	while mount | grep -q " on /usr/sbin/dnsmasq ";do
+		umount -l /usr/sbin/dnsmasq 2>/dev/null || { killall dnsmasq >/dev/null 2>&1; umount /usr/sbin/dnsmasq >/dev/null 2>&1; }
+		umnt_i=$((umnt_i + 1))
+		[ "$umnt_i" -ge 5 ] && break
+	done
 }
 
 
 mount_dnsmasq_now(){
-	MOUNTED=`mount|grep -o dnsmasq`
+	# 精确匹配挂载点，避免其它含"dnsmasq"字样的无关挂载(如别的插件bind的dnsmasq.conf)造成误判
+	MOUNTED=$(mount | grep " on /usr/sbin/dnsmasq ")
 	case $ss_basic_dnsmasq_fastlookup in
 	0)
 		if [ -n "$MOUNTED" ];then
@@ -3206,7 +3038,7 @@ mount_dnsmasq_now(){
 }
 
 umount_dnsmasq_now(){
-	MOUNTED=`mount|grep -o dnsmasq`
+	MOUNTED=$(mount | grep " on /usr/sbin/dnsmasq ")
 	case $ss_basic_dnsmasq_fastlookup in
 	0|1|2)
 		if [ -n "$MOUNTED" ];then
@@ -3237,9 +3069,11 @@ disable_ss(){
 	remove_ss_trigger_job
 	remove_ss_reboot_job
 	restore_conf
+	# 先清空劫持/转发规则再动dnsmasq：若先卸载重启dnsmasq，DNS劫持规则仍把全网:53指向
+	# 换血中的本机dnsmasq，会造成关闭插件瞬间的DNS中断窗口。
+	flush_nat
 	umount_dnsmasq_now
 	restart_dnsmasq
-	flush_nat
 	kill_cron_job
 	echo_date ------------------------ 【科学上网】已关闭 ----------------------------
 }
@@ -3282,7 +3116,7 @@ apply_ss(){
 	[ -z "$WAN_ACTION" ] && [ "$ss_basic_type" = "5" ] && create_naive_json
 	[ -z "$WAN_ACTION" ] && [ "$ss_basic_type" = "4" -a "$ss_basic_trojan_binary" == "Hysteria2" ] && create_hy2_json
 	[ "$ss_basic_type" == "0" ] || [ "$ss_basic_type" == "1" ] && start_ss_redir
-	[ "$ss_basic_type" == "2" ] && start_koolgame
+	[ "$ss_basic_type" == "2" ] && echo_date "koolgame已不再支持，跳过启动，请更换其它类型节点！"
 	[ "$ss_basic_type" == "3" ] || [ "$ss_basic_type" == "4" -a "$ss_basic_trojan_binary" == "Trojan" ] && start_xray_core
 	[ "$ss_basic_type" == "4" -a "$ss_basic_trojan_binary" == "Trojan-Go" ] && start_trojango
 	[ "$ss_basic_type" == "5" ] && start_naiveproxy
@@ -3290,11 +3124,15 @@ apply_ss(){
 	[ "$ss_basic_type" == "4" -a "$ss_basic_trojan_binary" == "AnyTLS" ] && start_anytls
 	[ "$ss_basic_type" != "2" ] && start_kcp
 	[ "$ss_basic_type" != "2" ] && start_dns
+	# dnsmasq替换(fastlookup)在load_nat之前：mount/umount已不再killall(bind mount不影响运行中
+	# 进程，换血由紧随的restart_dnsmasq完成)，且mount前有--test预检，替换失败自动保留原版。
+	# 此时ss的dnsmasq配置(create_dnsmasq_conf)已就绪，重启后即为最终形态，后续流程不再动dnsmasq，
+	# DNS劫持all档的存活校验(apply_dns_force)只需等待init异步拉起完成即可，default档不受影响。
+	mount_dnsmasq_now
+	restart_dnsmasq
 	#===load nat start===
 	load_nat
 	#===load nat end===
-	mount_dnsmasq_now
-	restart_dnsmasq
 	auto_start
 	write_cron_job
 	set_ss_reboot_job

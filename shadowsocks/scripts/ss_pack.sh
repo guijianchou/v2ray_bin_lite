@@ -16,7 +16,7 @@ mkdir shadowsocks/webs
 mkdir shadowsocks/res
 
 TARGET_FOLDER=/tmp/shadowsocks
-TARGET_BIN="base64_encode cdns chinadns  chinadns1 chinadns-ng client_linux_arm5 dns2socks dnsmasq haproxy haveged httping https_dns_proxy jq koolbox koolgame pdu resolveip rss-local rss-redir smartdns speederv1 speederv2 ss-local ss-redir ss-tunnel naive hysteria anytls udp2raw obfs-local xray"
+TARGET_BIN="base64_encode cdns chinadns  chinadns1 chinadns-ng client_linux_arm5 dns2socks dnsmasq haproxy haveged httping https_dns_proxy jq koolbox resolveip rss-local rss-redir smartdns ss-local ss-redir ss-tunnel naive hysteria anytls obfs-local xray"
 cp /koolshare/scripts/ss_install.sh $TARGET_FOLDER/install.sh
 cp /koolshare/scripts/uninstall_shadowsocks.sh $TARGET_FOLDER/uninstall.sh
 cp /koolshare/scripts/ss_* $TARGET_FOLDER/scripts/
@@ -33,7 +33,6 @@ cp /koolshare/res/game.png $TARGET_FOLDER/res/
 cp /koolshare/res/gameV2.png $TARGET_FOLDER/res/
 cp /koolshare/res/shadowsocks.css $TARGET_FOLDER/res/
 cp /koolshare/res/ss_proc_status.htm $TARGET_FOLDER/res/
-cp /koolshare/res/ss_udp_status.htm $TARGET_FOLDER/res/
 cp -rf /koolshare/res/layer $TARGET_FOLDER/res/
 cp -r /koolshare/ss $TARGET_FOLDER/
 rm -rf $TARGET_FOLDER/ss/*.json

@@ -7,12 +7,11 @@ sh /koolshare/ss/ssconfig.sh stop
 sh /koolshare/scripts/ss_conf_remove.sh
 sleep 1
 
-# 如果dnsmasq是mounted状态，先恢复
-MOUNTED=`mount|grep -o dnsmasq`
+# 如果dnsmasq是mounted状态，先恢复（精确匹配挂载点；惰性卸载不打断运行中的进程，由restart换血）
+MOUNTED=$(mount | grep " on /usr/sbin/dnsmasq ")
 if [ -n "$MOUNTED" ];then
 	echo_date 恢复dnsmasq-fastlookup为原版dnsmasq
-	killall dnsmasq >/dev/null 2>&1
-	umount /usr/sbin/dnsmasq
+	umount -l /usr/sbin/dnsmasq 2>/dev/null || { killall dnsmasq >/dev/null 2>&1; umount /usr/sbin/dnsmasq >/dev/null 2>&1; }
 	service restart_dnsmasq >/dev/null 2>&1
 fi
 TARGET_BIN="base64_encode cdns chinadns  chinadns1 chinadns-ng client_linux_arm5 dns2socks dnsmasq haproxy haveged hysteria anytls httping https_dns_proxy jq koolbox koolgame pdu resolveip rss-local rss-redir smartdns speederv1 speederv2 ss-local ss-redir ss-tunnel trojan-go naive udp2raw obfs-local xray"
@@ -32,6 +31,7 @@ rm -rf /koolshare/res/game.png
 rm -rf /koolshare/res/shadowsocks.css
 rm -rf /koolshare/res/gameV2.png
 rm -rf /koolshare/res/ss_proc_status.htm
+rm -rf /koolshare/res/ss_udp_status.htm
 rm -rf /koolshare/init.d/S89Socks5.sh
 
 # remove start up command

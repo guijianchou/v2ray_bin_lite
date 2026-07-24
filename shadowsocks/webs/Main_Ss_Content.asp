@@ -666,9 +666,38 @@ function update_ss_ui(obj) {
 	E("ss_basic_v2ray_json").value = do_js_beautify(Base64.decode(E("ss_basic_v2ray_json").value));
 }
 
+function is_ss_node() {
+	// 游戏模式仅限SS协议(ss-libev)：SSR/koolgame/naive/v2ray/trojan节点及SS2022(经xray运行)均不支持
+	var node_sel = E("ssconf_basic_node").value;
+	if (typeof(db_ss["ssconf_basic_rss_protocol_" + node_sel]) != "undefined") return false;
+	if (typeof(db_ss["ssconf_basic_koolgame_udp_" + node_sel]) != "undefined") return false;
+	if (typeof(db_ss["ssconf_basic_naive_protocol_" + node_sel]) != "undefined") return false;
+	if (typeof(db_ss["ssconf_basic_v2ray_use_json_" + node_sel]) != "undefined") return false;
+	if (typeof(db_ss["ssconf_basic_trojan_binary_" + node_sel]) != "undefined") return false;
+	var mth = db_ss["ssconf_basic_method_" + node_sel];
+	if (typeof(mth) == "undefined" && E("ss_basic_method")) mth = E("ss_basic_method").value;
+	if (mth && (mth.indexOf("2022-") == 0 || mth == "none")) return false;
+	return true;
+}
+
+function apply_game_mode_limit() {
+	// 非SS节点禁用两处模式select里的游戏模式选项；已选中时回退为大陆白名单
+	var ok = is_ss_node();
+	var ids = ["ss_basic_mode", "ss_node_table_mode"];
+	for (var k = 0; k < ids.length; k++) {
+		var sel = E(ids[k]);
+		if (!sel) continue;
+		for (var i = 0; i < sel.options.length; i++) {
+			if (sel.options[i].value == "3") sel.options[i].disabled = !ok;
+		}
+		if (!ok && sel.value == "3") sel.value = "2";
+	}
+}
+
 function verifyFields(r) {
 	// some variable
 	var node_sel = E("ssconf_basic_node").value;
+	apply_game_mode_limit();
 	var ssmode = E("ss_basic_mode").value;
     var ss_on = false;
     var ssr_on = false;
@@ -982,6 +1011,7 @@ function verifyFields(r) {
 }
 
 function update_visibility() {
+	apply_game_mode_limit();
 	var a = E("ss_basic_rule_update").value == "1";
 	var e = E("ss_dns_china").value == "12";
 	var f = E("ss_foreign_dns").value;
@@ -3101,7 +3131,7 @@ function refresh_acl_html() {
 			code = code + '<option value="0">不通过代理</option>';
 			code = code + '<option value="1">gfwlist模式</option>';
 			code = code + '<option value="2">大陆白名单模式</option>';
-			code = code + '<option value="3">游戏模式</option>';
+			if (is_ss_node()) code = code + '<option value="3">游戏模式</option>';
 			code = code + '<option value="5">全局代理模式</option>';
 			code = code + '<option value="6">回国模式</option>';
 		}

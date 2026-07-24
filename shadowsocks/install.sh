@@ -39,12 +39,11 @@ if [ -n "`ls /koolshare/ss/postscripts/P*.sh 2>/dev/null`" ];then
 	find /koolshare/ss/postscripts -name "P*.sh" -exec mv -f {} /tmp/ss_backup \;
 fi
 
-# 如果dnsmasq是mounted状态，先恢复
-MOUNTED=`mount|grep -o dnsmasq`
+# 如果dnsmasq是mounted状态，先恢复（精确匹配挂载点；惰性卸载不打断运行中的进程，由restart换血）
+MOUNTED=$(mount | grep " on /usr/sbin/dnsmasq ")
 if [ -n "$MOUNTED" ];then
 	echo_date 恢复dnsmasq-fastlookup为原版dnsmasq
-	killall dnsmasq >/dev/null 2>&1
-	umount /usr/sbin/dnsmasq
+	umount -l /usr/sbin/dnsmasq 2>/dev/null || { killall dnsmasq >/dev/null 2>&1; umount /usr/sbin/dnsmasq >/dev/null 2>&1; }
 	service restart_dnsmasq >/dev/null 2>&1
 fi
 
