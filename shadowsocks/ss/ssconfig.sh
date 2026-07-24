@@ -2324,31 +2324,11 @@ apply_forward_guard(){
 # 对策：强制 LAN 客户端 DNS 走本机 dnsmasq。
 #   1) 明文 DNS(UDP+TCP/53) 改道到本机 dnsmasq（原版仅劫持 UDP/53，这里补 TCP/53）；
 #   2) 拦 DoT(853) 与已知 DoH 解析器 IP 的 443(TCP/QUIC)，逼客户端回退明文 DNS→被改道。
-# 出错回退：改道前等待本机 dnsmasq 就绪(service restart_dnsmasq 为异步，重启/替换fastlookup期间
-# 瞬时单次探测会把"正在重启"误判为"未运行")，超时仍未就绪才返回 1，由 chromecast 回退到
-# default(仅UDP/53劫持)，避免把全网 DNS 改道到不存在的监听导致断网。只作用于转发的客户端流量
-# (FORWARD/PREROUTING -i br+)，不影响路由器自身上游 DNS(走 OUTPUT)。返回 0=已接管，返回 1=前置校验失败需回退 default。
+# 规则不依赖 dnsmasq 瞬时状态：default 档同样改道到本机 dnsmasq，二者对 dnsmasq 的依赖完全相同
+# (原版或 fastlookup 均可)，重启间隙由客户端自行重试。仅当 iptables 规则写入失败才返回 1 回退
+# default。只作用于转发的客户端流量(FORWARD/PREROUTING -i br+)，不影响路由器自身上游 DNS(走 OUTPUT)。
 apply_dns_force(){
 	[ "$ss_basic_dns_hijack" == "2" ] || return 1
-
-	# 前置校验（回退依据）：本机 dnsmasq 必须在运行，否则强制改道 = 全网 DNS 中断。
-	# 就绪标准 = 进程在跑且 UDP/53 已监听（改道目标可应答）。等待而非单次判死：
-	# service restart_dnsmasq 是异步的(fastlookup替换/还原后同样经它完成换血)，
-	# 校验瞬间可能正处于init重启dnsmasq的间隙，一次性探测会误回退 default。
-	local wait_i=0
-	until pidof dnsmasq >/dev/null 2>&1 && netstat -unl 2>/dev/null | grep -qE "[:.]53[[:space:]]"; do
-		if [ "$wait_i" -ge 30 ]; then
-			echo_date "DNS劫持(all)：等待30秒后本机 dnsmasq 仍未就绪，强制改道会导致DNS中断，自动回退默认劫持(default)。"
-			return 1
-		fi
-		[ "$wait_i" == "0" ] && echo_date "DNS劫持(all)：本机 dnsmasq 未就绪（可能正被重启或替换为fastlookup），等待其启动..."
-		wait_i=$((wait_i + 1))
-		sleep 1
-	done
-	# TCP/53 能力探测（软降级，不触发整体回退）：本机无 TCP/53 监听则跳过 TCP 改道，
-	# 避免把 TCP DNS 改道到不应答的端口。UDP 强制 + DoT/DoH 仍生效。
-	local tcp53_ok=0
-	netstat -tnl 2>/dev/null | grep -qE "[:.]53[^0-9]" && tcp53_ok=1
 
 	# 明文 DNS 改道：-I PREROUTING 1 确保先于 nat SHADOWSOCKS 链，否则 TCP/53 发往境外
 	# 解析器会命中 !chnroute 被 REDIRECT 进代理。目的为本机的 53 不改道，避免环路。
@@ -2357,14 +2337,13 @@ apply_dns_force(){
 		dst=$(ifconfig "$br" | grep "inet addr" | awk '{print $2}' | awk -F: '{print $2}')
 		[ -n "$dst" ] || continue
 		iptables -t nat -I PREROUTING 1 -i "$br" -p udp --dport 53 ! -d "$dst" -j DNAT --to-destination "$dst":53 >/dev/null 2>&1 && applied=1
-		[ "$tcp53_ok" == "1" ] && iptables -t nat -I PREROUTING 1 -i "$br" -p tcp --dport 53 ! -d "$dst" -j DNAT --to-destination "$dst":53 >/dev/null 2>&1
+		iptables -t nat -I PREROUTING 1 -i "$br" -p tcp --dport 53 ! -d "$dst" -j DNAT --to-destination "$dst":53 >/dev/null 2>&1
 	done
 	if [ "$applied" != "1" ]; then
 		echo_date "DNS劫持(all)：53 改道规则写入失败，自动回退默认劫持(default)。"
 		clean_dns_force
 		return 1
 	fi
-	[ "$tcp53_ok" != "1" ] && echo_date "DNS劫持(all)：本机未监听 TCP/53，已跳过 TCP/53 改道（仅 UDP 强制 + DoT/DoH）。"
 
 	# 加密 DNS 拦截链（REJECT 不可用自动 DROP）
 	ipset -! create ss_doh nethash >/dev/null 2>&1 && ipset flush ss_doh >/dev/null 2>&1
@@ -2768,7 +2747,7 @@ dns_hijack_control(){
 }
 
 # 默认劫持(default/1)：原 chromecast 行为，仅把 LAN 客户端 UDP/53 DNAT 到本机 dnsmasq。
-# 也作为 all 档前置校验失败时的回退目标。
+# 也作为 all 档规则写入失败时的回退目标。
 dns_hijack_default(){
 	dns_hijack_control
 	local VLAN_INDEXS=$(ifconfig | grep -E "^br" | awk '{print $1}' | sed 's/^br//g')
@@ -2791,13 +2770,13 @@ chromecast(){
 	fi
 	# 清理旧的 all 档强制规则，避免档位切换后残留
 	clean_dns_force
-	# DNS劫持三档：0=关闭 / 1=default(仅UDP/53劫持) / 2=all(强制全部+拦DoT/DoH，带回退)
+	# DNS劫持三档：0=关闭 / 1=default(仅UDP/53劫持) / 2=all(强制全部+拦DoT/DoH)
 	case "$ss_basic_dns_hijack" in
 		2)
 			if apply_dns_force; then
 				:
 			else
-				# all 前置校验失败：回退 default，保证至少不比原版差且 DNS 不断
+				# 仅当规则写入失败才回退 default，保证至少不比原版差
 				dns_hijack_default
 			fi
 			;;
@@ -2975,23 +2954,17 @@ detect(){
 }
 
 mount_dnsmasq(){
-	# bind mount只影响之后的路径解析，不影响正在运行的dnsmasq进程，因此无需killall；
-	# 真正的进程换血由随后的service restart_dnsmasq完成(init内部stop→start，间隙极短)，
-	# 不再人为制造"已杀等init异步拉起"的DNS中断窗口(DNS劫持default/all两档下全网DNS都指向本机)。
-	# 挂载前预检：用fastlookup二进制试析当前系统配置。该fork基于2015年上游(2.7x)，遇到新固件
-	# 写入的未知配置项会启动即退出；架构不兼容时执行本身就会失败。预检不过则拒绝替换保留原版，
-	# 避免替换后dnsmasq起不来导致全网断DNS(选项3下还会跨插件开关持续)。
+	# bind mount不影响运行中的进程，无需killall，换血由随后的service restart_dnsmasq完成。
+	# 挂载前用fastlookup试析当前配置(--test)，不兼容则保留原版，避免替换后dnsmasq起不来断DNS。
 	if ! /koolshare/bin/dnsmasq --test -C /etc/dnsmasq.conf >/dev/null 2>&1;then
-		echo_date "【dnsmasq替换】：dnsmasq-fastlookup与当前固件的dnsmasq配置不兼容，取消替换，继续使用原版dnsmasq！"
+		echo_date "【dnsmasq替换】：dnsmasq-fastlookup与当前dnsmasq配置不兼容，取消替换，继续使用原版dnsmasq！"
 		return 1
 	fi
 	mount --bind /koolshare/bin/dnsmasq /usr/sbin/dnsmasq
 }
 
 umount_dnsmasq(){
-	# 惰性卸载(-l)：挂载立即从命名空间摘除，之后的路径解析回到原版；正在运行的fastlookup进程
-	# 继续持有旧inode直至service restart_dnsmasq换回原版，同样无需killall制造中断窗口。
-	# 循环卸载以清理历史上可能叠加的多层bind mount；-l不可用时回退为杀进程后普通卸载。
+	# 惰性卸载(-l)：运行中的进程不受影响，由随后的restart换回原版；循环清理可能叠加的多层挂载
 	local umnt_i=0
 	while mount | grep -q " on /usr/sbin/dnsmasq ";do
 		umount -l /usr/sbin/dnsmasq 2>/dev/null || { killall dnsmasq >/dev/null 2>&1; umount /usr/sbin/dnsmasq >/dev/null 2>&1; }
@@ -3124,10 +3097,8 @@ apply_ss(){
 	[ "$ss_basic_type" == "4" -a "$ss_basic_trojan_binary" == "AnyTLS" ] && start_anytls
 	[ "$ss_basic_type" != "2" ] && start_kcp
 	[ "$ss_basic_type" != "2" ] && start_dns
-	# dnsmasq替换(fastlookup)在load_nat之前：mount/umount已不再killall(bind mount不影响运行中
-	# 进程，换血由紧随的restart_dnsmasq完成)，且mount前有--test预检，替换失败自动保留原版。
-	# 此时ss的dnsmasq配置(create_dnsmasq_conf)已就绪，重启后即为最终形态，后续流程不再动dnsmasq，
-	# DNS劫持all档的存活校验(apply_dns_force)只需等待init异步拉起完成即可，default档不受影响。
+	# dnsmasq替换(fastlookup)：bind mount不影响运行中的进程，由紧随的restart_dnsmasq完成换血；
+	# 放在create_dnsmasq_conf之后、load_nat之前，重启后即为最终形态。
 	mount_dnsmasq_now
 	restart_dnsmasq
 	#===load nat start===

@@ -18,7 +18,13 @@ remove_first(){
 remove_first
 
 echo_date 检测到ss备份文件...
-< /tmp/ss_conf_backup.txt sed -e '/^ss/!d' -e '/_webtest_\|ssid_\|ssserver_\|_ping_\|ss_node_table\|_state_/d' -e 's/=/=\"/' -e 's/$/\"/g' -e 's/^/dbus set /' -e '1 i\\n' -e '1 isource /koolshare/scripts/base.sh' -e '1 i#!/bin/sh' > /tmp/ss_conf_backup_tmp.sh
+# 头部直接拼接(原先sed的 '1 i\\n' 会插入字面量"n"，导致执行临时脚本时报 n: not found)
+{
+	echo '#!/bin/sh'
+	echo 'source /koolshare/scripts/base.sh'
+	echo ''
+	< /tmp/ss_conf_backup.txt sed -e '/^ss/!d' -e '/_webtest_\|ssid_\|ssserver_\|_ping_\|ss_node_table\|_state_/d' -e 's/=/=\"/' -e 's/$/\"/g' -e 's/^/dbus set /'
+} > /tmp/ss_conf_backup_tmp.sh
 echo_date 开始恢复配置...
 chmod +x /tmp/ss_conf_backup_tmp.sh
 sh /tmp/ss_conf_backup_tmp.sh

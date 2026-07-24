@@ -776,7 +776,7 @@ function openssHint(itemNum) {
 		_caption = "说明：";
 	} else if (itemNum == 106) {
 		width = "600px";
-		statusmenu = "DNS劫持（原chromecast功能）.<br />&nbsp;&nbsp;&nbsp;&nbsp;把局域网客户端的DNS解析强制交给路由器dnsmasq，避免DNS污染；同时也是“黑白名单/大陆白名单”可靠生效的前提——白名单域名靠dnsmasq解析时把IP写入白名单集合，客户端若绕过dnsmasq，白名单域名的真实IP就不会被放行而仍走代理。<br />&nbsp;&nbsp;&nbsp;&nbsp;<b>三个档位：</b><br />&nbsp;&nbsp;&nbsp;&nbsp;<b>关闭</b>：不劫持，客户端可自定义DNS。<br />&nbsp;&nbsp;&nbsp;&nbsp;<b>默认（原chromecast）</b>：只把明文 UDP/53 劫持到路由器DNS。对付设备手动设8.8.8.8等明文DNS足够，但挡不住浏览器/系统的DoH/DoT。<br />&nbsp;&nbsp;&nbsp;&nbsp;<b>全部（推荐用于大陆白名单）</b>：在“默认”基础上再劫持 TCP/53，并拦截 DoT(853) 与常见 DoH 解析器IP的443，逼客户端回退明文DNS→被路由器接管。这样白名单域名（含Cloudflare/CDN站）连接的真实IP才能可靠进入白名单直连，解决“加了白名单仍走代理/CF盾显示代理出口IP”。代价：会接管设备上自设的私有DNS/DoH。<br />&nbsp;&nbsp;&nbsp;&nbsp;<b>出错回退</b>：选“全部”时若检测到本机dnsmasq未运行等异常，会自动回退到“默认”模式，避免把全网DNS改道到不存在的服务导致断网。"
+		statusmenu = "DNS劫持（原chromecast功能）.<br />&nbsp;&nbsp;&nbsp;&nbsp;把局域网客户端的DNS解析强制交给路由器dnsmasq，避免DNS污染；同时也是“黑白名单/大陆白名单”可靠生效的前提——白名单域名靠dnsmasq解析时把IP写入白名单集合，客户端若绕过dnsmasq，白名单域名的真实IP就不会被放行而仍走代理。<br />&nbsp;&nbsp;&nbsp;&nbsp;<b>三个档位：</b><br />&nbsp;&nbsp;&nbsp;&nbsp;<b>关闭</b>：不劫持，客户端可自定义DNS。<br />&nbsp;&nbsp;&nbsp;&nbsp;<b>默认（原chromecast）</b>：只把明文 UDP/53 劫持到路由器DNS。对付设备手动设8.8.8.8等明文DNS足够，但挡不住浏览器/系统的DoH/DoT。<br />&nbsp;&nbsp;&nbsp;&nbsp;<b>全部（推荐用于大陆白名单）</b>：在“默认”基础上再劫持 TCP/53，并拦截 DoT(853) 与常见 DoH 解析器IP的443，逼客户端回退明文DNS→被路由器接管。这样白名单域名（含Cloudflare/CDN站）连接的真实IP才能可靠进入白名单直连，解决“加了白名单仍走代理/CF盾显示代理出口IP”。代价：会接管设备上自设的私有DNS/DoH。<br />&nbsp;&nbsp;&nbsp;&nbsp;<b>出错回退</b>：仅当劫持规则写入失败时自动回退“默认”；劫持与dnsmasq运行状态解耦（含替换为dnsmasq-fastlookup的场景），dnsmasq重启间隙由客户端重试自愈。"
 		_caption = "说明：";
 	} else if (itemNum == 107) {
 		width = "600px";
