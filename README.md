@@ -33,7 +33,7 @@ Hysteria2 目前是最稳定，速度也是最快的。
 
 ## 本分支（v2ray_bin_lite）变更
 
-当前版本：**5.2.0**（离线包：`shadowsocks-5.2.0.tar.gz`）
+当前版本：**5.2.1**（离线包：`shadowsocks-5.2.1.tar.gz`）
 
 本分支在原 [cary-sas/v2ray_bin](https://github.com/cary-sas/v2ray_bin) 基础上，聚焦大陆白名单场景做了如下调整（上文功能列表描述的是插件底层能力，本分支在界面上对部分入口做了精简，以下为准）：
 
@@ -61,14 +61,16 @@ Hysteria2 目前是最稳定，速度也是最快的。
 * **关闭**：不劫持，客户端可自定义 DNS；
 * **默认**：仅劫持明文 UDP/53 到路由器 dnsmasq；
 * **全部（推荐用于大陆白名单）**：加劫持 TCP/53，并拦截 DoT(853) 与常见 DoH 解析器 IP 的 443，逼客户端回退明文 DNS 被路由器接管，保证白名单域名（含 Cloudflare/CDN 站）的真实 IP 可靠进入白名单直连；
-* 出错回退：选「全部」时等待本机 dnsmasq 就绪（最多 30 秒），仍未就绪自动回退「默认」，避免把全网 DNS 改道到不存在的监听导致断网。
+* 出错回退：仅当劫持规则写入失败时自动回退「默认」；劫持与 dnsmasq 瞬时状态完全解耦（两档最终都指向本机 dnsmasq，重启间隙由客户端重试自愈）。
 
-### dnsmasq-fastlookup 兼容与安全加固（5.2.0）
+### dnsmasq-fastlookup 兼容与安全加固（5.2.0 / 5.2.1）
 「替换为 dnsmasq-fastlookup」与「DNS 劫持」两档在原版 / fastlookup 下均可靠工作：
 
+* **DNS 劫持与替换状态彻底解耦（5.2.1）**：劫持规则无条件加载，不再探测 dnsmasq 瞬时状态——default/all 对本机 dnsmasq 的依赖完全相同，fastlookup 只是 dnsmasq 的替代实现，代理链路不因替换发生偏移；
 * 替换/还原不再先杀 dnsmasq 等 init 异步拉起，改由 bind mount + service 重启原地换血，消除人为 DNS 中断窗口（此前该窗口会导致 DNS 劫持「全部」档被误回退「默认」）；
 * 替换前用 fastlookup 二进制预检（`--test`）当前系统配置，旧版 fork 不兼容当前固件配置时自动放弃替换、保留原版，避免替换后全网断 DNS；
-* 还原改用惰性卸载（`umount -l`），挂载点检测精确匹配 `/usr/sbin/dnsmasq`；关闭插件时先清空劫持规则再动 dnsmasq，消除停止瞬间的 DNS 中断。
+* 还原改用惰性卸载（`umount -l`），挂载点检测精确匹配 `/usr/sbin/dnsmasq`；关闭插件时先清空劫持规则再动 dnsmasq，消除停止瞬间的 DNS 中断；
+* 修复「恢复配置」时临时脚本首行混入杂质导致的 `n: not found` 报错（5.2.1）。
 
 ### 界面与体积精简
 * 移除「KCP 加速」「UDP 加速」入口；5.2.0 起进一步移除 `koolgame` `speederv1` `speederv2` `udp2raw` `pdu` 二进制及全部相关死代码（安装包缩小约 2.5MB，升级时自动清理路由器上的旧文件）；
